@@ -1,61 +1,35 @@
-# HomeService – App di động
+# HomeService Mobile
 
-App di động dùng chung cho **Khách hàng** và **Tasker** của hệ thống HomeService (giao diện/chức năng phân biệt theo vai trò sau khi đăng nhập). Đề tài Công nghệ phần mềm Nâng cao, Nhóm 01.
+Flutter client for customer and Tasker flows. Requires Flutter 3.44+ (Dart 3.12+) and the HomeService API.
 
-- **Framework**: Flutter (Dart) ≥ 3.3
-- **State management**: provider
-- **HTTP**: package `http`, tự gắn JWT qua `SharedPreferences`
-- **Backend**: gọi API từ repo `HomeService-Backend`
+## Run
 
-## ⚠️ Bước bắt buộc trước khi chạy
+From this directory:
 
-Repo này chỉ chứa mã nguồn Dart (`lib/`) và cấu hình (`pubspec.yaml`) — **chưa có** các thư mục nền tảng (`android/`, `ios/`...) vì môi trường tạo scaffold không cài Flutter SDK. Sau khi clone về máy đã cài Flutter, chạy:
-
-```bash
-flutter create . --project-name homeservice_mobile --org com.homeservice
-flutter pub get
-```
-
-Lệnh `flutter create .` sẽ sinh các thư mục `android/`, `ios/`, v.v. mà **không** ghi đè `lib/` hay `pubspec.yaml` đã có sẵn.
-
-## Cấu trúc thư mục
-
-```
-lib/
-├── core/                  # constants.dart (URL backend), api_client.dart (HTTP + JWT)
-├── models/                 # user.dart, service_category.dart, booking.dart
-├── features/
-│   ├── auth/                # login_screen, register_screen, auth_provider (US01-US03)
-│   ├── customer/             # customer_home, booking_create, booking_history, service_repository (US10, US12-US15)
-│   └── tasker/                 # tasker_home_screen (US17, US18, US20)
-└── main.dart
-```
-
-## Cấu hình kết nối Backend
-
-Sửa `lib/core/constants.dart`:
-
-```dart
-static const String apiBaseUrl = 'http://10.0.2.2:8080/api'; // Android emulator
-// hoặc 'http://localhost:8080/api' khi chạy trên web/desktop
-// hoặc IP LAN máy chạy backend khi test trên điện thoại thật
-```
-
-## Chạy dự án
-
-```bash
+```powershell
 flutter pub get
 flutter run
 ```
 
-## Các màn hình đã scaffold
+By default, the app calls `http://10.0.2.2:8080/api`, which reaches the host machine from an Android Emulator running the backend with Docker Compose. Override it for another environment:
 
-| Màn hình | User Story |
-|---|---|
-| LoginScreen / RegisterScreen | US01, US02 – Đăng ký, đăng nhập (chọn vai trò Khách hàng/Tasker) |
-| CustomerHomeScreen | US10 – Xem/Tìm kiếm dịch vụ |
-| BookingCreateScreen | US12/US13 – Tạo đơn, chọn thời gian & địa chỉ |
-| BookingHistoryScreen | US14/US15 – Hủy đơn, xem lịch sử |
-| TaskerHomeScreen | US17/US18/US20 – Nhận/từ chối đơn, cập nhật trạng thái, xem đơn đã nhận |
+```powershell
+flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080/api
+```
 
-Các User Story còn lại (US19 theo dõi vị trí realtime, US21 thanh toán, US25/US26 đánh giá, US28/US29 thông báo...) sẽ được nhóm bổ sung dần theo Sprint trong file Backlog. Gợi ý: US19 có thể dùng package `google_maps_flutter` hoặc `flutter_map`; US28/US29 có thể dùng Firebase Cloud Messaging.
+For a physical device, use the development machine's LAN IP. Use HTTPS for release builds; cleartext traffic is enabled only in the Android debug manifest.
+
+## Implemented flows
+
+- Customer: register/sign in, load service categories, share current GPS coordinates, create cash or simulated online bookings, view bookings, and manage notifications.
+- Tasker: register/sign in, view and accept/reject offers, manage availability, view bookings, and manage notifications. A Tasker profile must already exist in the backend.
+
+JWTs are stored with platform secure storage. API and response models are in `lib/data/api_client.dart`; screens are in `lib/ui/app_pages.dart`.
+
+Run checks with:
+
+```powershell
+flutter analyze
+flutter test
+flutter build apk --debug
+```
