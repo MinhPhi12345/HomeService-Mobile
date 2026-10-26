@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Màu thương hiệu HomeService (khớp AppColors.primary) -->
+    <color name="splash_background">#13B5A5</color>
+    <color name="ic_launcher_background">#13B5A5</color>
+</resources>

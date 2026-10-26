@@ -2,14 +2,71 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
-import 'data/api_client.dart';
-import 'ui/app_pages.dart';
+import 'core/api_client.dart';
+import 'core/app_scope.dart';
+import 'features/auth/auth_gate.dart';
+import 'features/splash/splash_page.dart';
+import 'theme/app_theme.dart';
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  await initializeDateFormatting('vi');
-  final api = await ApiClient.create();
-  runApp(HomeServiceApp(api: api));
+  runApp(const HomeServiceRoot());
+}
+
+/// Gốc ứng dụng: hiện màn chờ trong lúc khởi động, xong thì chuyển (mờ dần) sang app chính.
+class HomeServiceRoot extends StatefulWidget {
+  const HomeServiceRoot({super.key});
+
+  @override
+  State<HomeServiceRoot> createState() => _HomeServiceRootState();
+}
+
+class _HomeServiceRootState extends State<HomeServiceRoot> {
+  /// Màn chờ hiện tối thiểu chừng này để hiệu ứng logo chạy trọn vẹn.
+  static const _minimumSplash = Duration(milliseconds: 1700);
+
+  ApiClient? _api;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _start();
+  }
+
+  Future<void> _start() async {
+    if (_error != null) setState(() => _error = null);
+    final started = DateTime.now();
+    try {
+      await initializeDateFormatting('vi');
+      final api = await ApiClient.create();
+      final wait = _minimumSplash - DateTime.now().difference(started);
+      if (wait > Duration.zero) await Future<void>.delayed(wait);
+      if (mounted) setState(() => _api = api);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error = 'Không khởi động được ứng dụng. Vui lòng thử lại.');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final api = _api;
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 500),
+      switchInCurve: Curves.easeOut,
+      switchOutCurve: Curves.easeIn,
+      child: api == null
+          ? MaterialApp(
+              key: const ValueKey('splash'),
+              debugShowCheckedModeBanner: false,
+              theme: buildAppTheme(),
+              home: SplashPage(error: _error, onRetry: _start),
+            )
+          : HomeServiceApp(key: const ValueKey('app'), api: api),
+    );
+  }
 }
 
 class HomeServiceApp extends StatelessWidget {
@@ -19,49 +76,18 @@ class HomeServiceApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'HomeService',
-      debugShowCheckedModeBanner: false,
-      locale: const Locale('vi'),
-      supportedLocales: const [Locale('vi'), Locale('en')],
-      localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      theme: ThemeData(
-        useMaterial3: true,
-        scaffoldBackgroundColor: const Color(0xFFFFFCF5),
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF13B5A5),
-          primary: const Color(0xFF13B5A5),
-          surface: const Color(0xFFFFFCF5),
-        ),
-        fontFamily: 'Roboto',
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFFFFCF5),
-          foregroundColor: Color(0xFF18383A),
-          elevation: 0,
-          centerTitle: false,
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: Colors.white,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 15,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Color(0xFFE5ECE9)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Color(0xFFE5ECE9)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Color(0xFF13B5A5), width: 1.5),
-          ),
-        ),
+    return AppScope(
+      client: api,
+      child: MaterialApp(
+        title: 'HomeService',
+        navigatorKey: rootNavigatorKey,
+        debugShowCheckedModeBanner: false,
+        theme: buildAppTheme(),
+        locale: const Locale('vi'),
+        supportedLocales: const [Locale('vi'), Locale('en')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        home: AuthGate(api: api),
       ),
-      home: AuthGate(api: api),
     );
   }
 }
