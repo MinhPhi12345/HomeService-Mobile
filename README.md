@@ -74,4 +74,10 @@ flutter test
 flutter build apk --debug
 ```
 
-Build APK cho bản demo (trỏ về VPS): `flutter build apk --release --dart-define=API_BASE_URL=http://<IP-VPS>:8080/api`. File nằm ở `build/app/outputs/flutter-apk/app-release.apk`, có thể gắn link tải lên Web Customer.
+Build APK bản chạy thật (Backend đã deploy):
+
+```powershell
+flutter build apk --release --dart-define=API_BASE_URL=https://api.homeservice.id.vn/api
+```
+
+File nằm ở `build/app/outputs/flutter-apk/app-release.apk` – đổi tên thành `HomeService.apk` và chép vào `HomeService-Web-Customer/public/downloads/` để nút "Tải ứng dụng Android" trên website hoạt động.

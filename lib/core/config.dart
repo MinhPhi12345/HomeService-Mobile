@@ -4,7 +4,7 @@
 /// - Điện thoại thật cắm cáp + `adb reverse tcp:8080 tcp:8080`: giữ mặc định `http://localhost:8080/api`
 /// - Android emulator: `flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080/api`
 /// - Điện thoại qua Wi-Fi: `flutter run --dart-define=API_BASE_URL=http://<IP-máy-tính>:8080/api`
-/// - Bản deploy VPS: `flutter build apk --dart-define=API_BASE_URL=http://<IP-VPS>:8080/api`
+/// - Bản deploy: `flutter build apk --release --dart-define=API_BASE_URL=https://api.homeservice.id.vn/api`
 class AppConfig {
   AppConfig._();
 
