@@ -1,16 +1,22 @@
 /// Cấu hình chung của app.
 ///
-/// Địa chỉ Backend đọc từ `--dart-define=API_BASE_URL=...` khi chạy:
-/// - Điện thoại thật cắm cáp + `adb reverse tcp:8080 tcp:8080`: giữ mặc định `http://localhost:8080/api`
-/// - Android emulator: `flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080/api`
-/// - Điện thoại qua Wi-Fi: `flutter run --dart-define=API_BASE_URL=http://<IP-máy-tính>:8080/api`
-/// - Bản deploy: `flutter build apk --release --dart-define=API_BASE_URL=https://api.homeservice.id.vn/api`
+/// Địa chỉ Backend: mặc định là máy chủ thật `https://api.homeservice.id.vn/api`
+/// (`flutter run`, `flutter build apk` không cần thêm gì).
+/// Khi lập trình với Backend chạy trên máy tính, ghi đè bằng `--dart-define=API_BASE_URL=...`:
+/// - Điện thoại cắm cáp + `adb reverse tcp:8080 tcp:8080`: `--dart-define=API_BASE_URL=http://localhost:8080/api`
+/// - Android emulator: `--dart-define=API_BASE_URL=http://10.0.2.2:8080/api`
 class AppConfig {
   AppConfig._();
 
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://localhost:8080/api',
+    defaultValue: 'https://api.homeservice.id.vn/api',
+  );
+
+  /// Phiên bản hiển thị trong mục Tài khoản – khớp `version:` trong pubspec.yaml.
+  static const String appVersion = String.fromEnvironment(
+    'APP_VERSION',
+    defaultValue: '1.0.0',
   );
 
   /// Thời gian chờ tối đa cho 1 request.
@@ -29,7 +35,7 @@ class AppConfig {
   static const Duration bookingRefresh = Duration(seconds: 10);
   static const Duration badgeRefresh = Duration(seconds: 30);
 
-  /// Gốc Backend (bỏ "/api"): "http://localhost:8080/api" → "http://localhost:8080".
+  /// Gốc Backend (bỏ "/api"): "https://api.homeservice.id.vn/api" → "https://api.homeservice.id.vn".
   static String get mediaOrigin =>
       apiBaseUrl.replaceAll(RegExp(r'/+$'), '').replaceAll(RegExp(r'/api$'), '');
 

@@ -766,10 +766,14 @@ class ApiClient extends ChangeNotifier {
   Future<http.Response> _guard(Future<http.Response> Function() run) async {
     try {
       return await run();
+    } on HandshakeException {
+      throw const ApiFailure(
+        'Không tạo được kết nối an toàn tới máy chủ. Hãy kiểm tra ngày giờ trên điện thoại rồi thử lại.',
+      );
     } on SocketException {
-      // Ghi kèm địa chỉ API để biết app đang gọi tới đâu (localhost / IP máy tính / 10.0.2.2)
-      throw ApiFailure(
-        'Không kết nối được máy chủ $_baseUrl. Hãy kiểm tra Backend đang chạy và địa chỉ API.',
+      if (kDebugMode) debugPrint('Không kết nối được $_baseUrl');
+      throw const ApiFailure(
+        'Không kết nối được máy chủ. Vui lòng kiểm tra kết nối Internet (Wi-Fi hoặc 4G) rồi thử lại.',
       );
     } on TimeoutException {
       throw const ApiFailure('Máy chủ phản hồi quá lâu. Vui lòng thử lại.');

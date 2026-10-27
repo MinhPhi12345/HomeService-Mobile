@@ -2,28 +2,27 @@
 
 Ứng dụng Flutter cho **Khách hàng** và **Tasker** của hệ thống HomeService (Nhóm 15). Gọi API của repo `HomeService-Backend`.
 
-- Flutter 3.44+ (Dart 3.12+), Android 8.0 (API 26) trở lên
+- Flutter 3.44+ (Dart 3.12+), chạy trên Android 7.0 (API 24) trở lên
 - Bản đồ: OpenStreetMap (`flutter_map`) – miễn phí, không cần Google Maps API key
 - Chỉ đường / gọi điện: mở app Google Maps và trình gọi điện có sẵn (`url_launcher`)
 
 ## Chạy app
 
-1. Bật Backend: trong thư mục `HomeService-Backend` chạy `docker compose up`.
-2. Trong thư mục này:
-
 ```powershell
 flutter pub get
+flutter run
 ```
 
-3. Chọn cách kết nối Backend:
+Mặc định app gọi máy chủ thật **https://api.homeservice.id.vn/api** – không cần bật Backend trên máy.
+
+Khi lập trình với Backend chạy trên máy tính (`docker compose up` trong `HomeService-Backend`):
 
 | Thiết bị | Lệnh |
 |---|---|
-| Điện thoại thật cắm cáp (khuyên dùng) | `adb reverse tcp:8080 tcp:8080` rồi `flutter run` |
+| Điện thoại thật cắm cáp | `adb reverse tcp:8080 tcp:8080` rồi `flutter run --dart-define=API_BASE_URL=http://localhost:8080/api` |
 | Android emulator | `flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080/api` |
-| Điện thoại qua Wi-Fi | `flutter run --dart-define=API_BASE_URL=http://<IP-máy-tính>:8080/api` |
 
-`adb` nằm ở `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`. Rút cáp ra cắm lại thì chạy lại `adb reverse`.
+`adb` nằm ở `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`.
 
 ## Cấu trúc
 
@@ -74,10 +73,16 @@ flutter test
 flutter build apk --debug
 ```
 
-Build APK bản chạy thật (Backend đã deploy):
+### Build APK phát hành (cài được trên mọi điện thoại Android 7.0+)
 
-```powershell
-flutter build apk --release --dart-define=API_BASE_URL=https://api.homeservice.id.vn/api
-```
+1. **Lần đầu**: tạo khóa ký – `powershell -ExecutionPolicy Bypass -File .\tao-khoa-ky-apk.ps1`
+   (tạo `android\app\homeservice-release.jks` + `android\key.properties`, **không commit, nhớ sao lưu**).
+   Mọi bản cập nhật phải ký cùng khóa này thì điện thoại mới cài đè được lên bản cũ.
+2. Mỗi lần phát hành: tăng `version:` trong `pubspec.yaml` (vd `1.0.1+2` – số sau dấu `+` luôn tăng), rồi
+   ```powershell
+   flutter build apk --release
+   ```
+   Đây là APK "đa kiến trúc" (arm64-v8a, armeabi-v7a, x86_64) nên chạy được trên mọi dòng máy. **Không** dùng `--split-per-abi`.
+3. File: `build/app/outputs/flutter-apk/app-release.apk` – script `build-deploy.ps1` (thư mục `Nang Cao`) tự chép thành `HomeService.apk` vào bản deploy của Web Customer.
 
-File nằm ở `build/app/outputs/flutter-apk/app-release.apk` – đổi tên thành `HomeService.apk` và chép vào `HomeService-Web-Customer/public/downloads/` để nút "Tải ứng dụng Android" trên website hoạt động.
+App tự tin cậy chứng chỉ gốc Let's Encrypt (`lib/core/trusted_roots.dart`) nên HTTPS chạy được cả trên Android 7.0.

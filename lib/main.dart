@@ -4,12 +4,14 @@ import 'package:intl/date_symbol_data_local.dart';
 
 import 'core/api_client.dart';
 import 'core/app_scope.dart';
+import 'core/trusted_roots.dart';
 import 'features/auth/auth_gate.dart';
 import 'features/splash/splash_page.dart';
 import 'theme/app_theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  installExtraRootCertificates(); // HTTPS Let's Encrypt chạy được cả trên Android đời cũ
   runApp(const HomeServiceRoot());
 }
 

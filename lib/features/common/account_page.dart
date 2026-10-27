@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
 import '../../core/app_scope.dart';
+import '../../core/config.dart';
 import '../../core/format.dart';
 import '../../core/labels.dart';
 import '../../core/models.dart';
@@ -176,10 +177,10 @@ class _AccountPageState extends State<AccountPage> {
             const SectionHeader('Khác'),
             _MenuGroup(
               children: [
-                _MenuItem(
-                  icon: Icons.dns_outlined,
-                  title: 'Máy chủ đang kết nối',
-                  subtitle: api.baseUrl,
+                const _MenuItem(
+                  icon: Icons.info_outline_rounded,
+                  title: 'Phiên bản ứng dụng',
+                  subtitle: 'HomeService ${AppConfig.appVersion}',
                 ),
                 _MenuItem(
                   icon: Icons.logout_rounded,
