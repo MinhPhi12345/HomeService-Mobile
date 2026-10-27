@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'config.dart';
 import 'models.dart';
+import 'service_images.dart';
 
 /// Lỗi đã được dịch sang câu tiếng Việt để hiện thẳng cho người dùng (SRS 8.6).
 class ApiFailure implements Exception {
@@ -199,7 +200,21 @@ class ApiClient extends ChangeNotifier {
       query: {if (keyword != null && keyword.isNotEmpty) 'keyword': keyword},
       auth: false,
     );
-    return _parseList(result, ServiceCategory.fromJson);
+    final list = _parseList(result, ServiceCategory.fromJson);
+    if (keyword == null || keyword.isEmpty) {
+      ServiceImages.update(list.map((s) => (name: s.name, iconUrl: s.iconUrl)));
+    }
+    return list;
+  }
+
+  /// Tải ảnh dịch vụ 1 lần cho các màn chỉ có tên dịch vụ (thẻ đơn, lời mời của Tasker…).
+  Future<void> ensureServiceImages() async {
+    if (!ServiceImages.isEmpty) return;
+    try {
+      await getCategories();
+    } catch (_) {
+      // Không có mạng: dùng icon mặc định
+    }
   }
 
   // ---------------------------------------------------------------- Đơn hàng

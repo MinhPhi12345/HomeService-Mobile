@@ -29,18 +29,20 @@ class AppConfig {
   static const Duration bookingRefresh = Duration(seconds: 10);
   static const Duration badgeRefresh = Duration(seconds: 30);
 
-  /// Ảnh do Backend trả về chứa host mà máy đã gửi ảnh lên (vd: localhost:8080 khi tải từ web).
-  /// Đổi sang host của [apiBaseUrl] để điện thoại/emulator mở được.
+  /// Gốc Backend (bỏ "/api"): "http://localhost:8080/api" → "http://localhost:8080".
+  static String get mediaOrigin =>
+      apiBaseUrl.replaceAll(RegExp(r'/+$'), '').replaceAll(RegExp(r'/api$'), '');
+
+  /// Đường dẫn ảnh Backend lưu ("/uploads/…") → URL đầy đủ theo [apiBaseUrl].
+  /// Ảnh cũ dạng "http://localhost:8080/uploads/…" cũng được trỏ về Backend đang dùng
+  /// để điện thoại / emulator / bản deploy đều mở được.
   static String? mediaUrl(String? url) {
-    if (url == null || url.isEmpty) return null;
-    final media = Uri.tryParse(url);
-    final api = Uri.tryParse(apiBaseUrl);
-    if (media == null || api == null || !media.hasScheme) return url;
-    const localHosts = {'localhost', '127.0.0.1', '10.0.2.2'};
-    if (localHosts.contains(media.host) && media.host != api.host) {
-      return media.replace(host: api.host, port: api.port).toString();
-    }
-    return url;
+    if (url == null || url.trim().isEmpty) return null;
+    final value = url.trim();
+    final legacy = RegExp(r'^https?://[^/]+(/uploads/.*)$', caseSensitive: false).firstMatch(value);
+    if (legacy != null) return '$mediaOrigin${legacy.group(1)}';
+    if (RegExp(r'^https?://', caseSensitive: false).hasMatch(value)) return value;
+    return '$mediaOrigin${value.startsWith('/') ? '' : '/'}$value';
   }
 }
 

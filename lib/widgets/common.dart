@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/config.dart';
+import '../core/service_images.dart';
 import '../core/format.dart';
 import '../theme/app_theme.dart';
 
@@ -664,23 +665,51 @@ class ServiceVisual {
   }
 }
 
+/// Ô biểu tượng dịch vụ: ưu tiên ảnh Admin tải lên ([imageUrl] hoặc tra theo tên),
+/// chưa có ảnh / ảnh lỗi thì dùng icon màu theo tên dịch vụ.
 class ServiceIconBadge extends StatelessWidget {
-  const ServiceIconBadge({super.key, required this.name, this.size = 48});
+  const ServiceIconBadge({
+    super.key,
+    required this.name,
+    this.size = 48,
+    this.imageUrl,
+  });
 
   final String name;
   final double size;
+  final String? imageUrl;
 
   @override
   Widget build(BuildContext context) {
     final visual = ServiceVisual.of(name);
-    return Container(
+    final radius = BorderRadius.circular(size * 0.32);
+    final fallback = Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
         color: AppColors.soft(visual.color),
-        borderRadius: BorderRadius.circular(size * 0.32),
+        borderRadius: radius,
       ),
       child: Icon(visual.icon, color: visual.color, size: size * 0.52),
+    );
+    return ValueListenableBuilder<Map<String, String?>>(
+      valueListenable: ServiceImages.byName,
+      builder: (context, _, _) {
+        final src = AppConfig.mediaUrl(imageUrl ?? ServiceImages.of(name));
+        if (src == null) return fallback;
+        return ClipRRect(
+          borderRadius: radius,
+          child: Image.network(
+            src,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            errorBuilder: (context, error, stack) => fallback,
+            loadingBuilder: (context, child, progress) =>
+                progress == null ? child : fallback,
+          ),
+        );
+      },
     );
   }
 }

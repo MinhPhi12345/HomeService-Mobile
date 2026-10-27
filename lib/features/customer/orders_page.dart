@@ -132,6 +132,7 @@ class _OrderListState extends State<_OrderList>
     if (_busy) return;
     _busy = true;
     final api = AppScope.api(context);
+    unawaited(api.ensureServiceImages()); // ảnh dịch vụ cho thẻ đơn
     if (!silent) setState(() => _error = null);
     try {
       final items = await api.getMyBookings(statuses: widget.statuses);

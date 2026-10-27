@@ -324,7 +324,7 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                ServiceIconBadge(name: service.name, size: 56),
+                ServiceIconBadge(name: service.name, size: 56, imageUrl: service.iconUrl),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(

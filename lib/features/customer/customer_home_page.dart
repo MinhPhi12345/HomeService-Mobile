@@ -281,7 +281,7 @@ class _ServiceTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ServiceIconBadge(name: service.name, size: 46),
+          ServiceIconBadge(name: service.name, size: 46, imageUrl: service.iconUrl),
           const SizedBox(height: 12),
           Text(
             service.name,
