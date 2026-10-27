@@ -167,6 +167,13 @@ void main() {
       expect(AppConfig.mediaUrl(null), isNull);
     });
 
+    test('Ảnh dạng tương đối /uploads/… được ghép địa chỉ Backend', () {
+      final url = AppConfig.mediaUrl('/uploads/202610/b.png');
+      expect(url, '${AppConfig.mediaOrigin}/uploads/202610/b.png');
+      expect(Uri.parse(url!).hasScheme, isTrue);
+      expect(AppConfig.mediaUrl('https://cdn.example.com/x.png'), 'https://cdn.example.com/x.png');
+    });
+
     test('Nhãn trạng thái đơn', () {
       expect(BookingStatus.label(BookingStatus.awaitingPayment), 'Chờ thanh toán');
       expect(BookingStatus.active.contains(BookingStatus.paymentOverdue), isTrue);

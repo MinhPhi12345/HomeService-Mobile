@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'config.dart';
 import 'models.dart';
+import 'service_images.dart';
 
 /// Lỗi đã được dịch sang câu tiếng Việt để hiện thẳng cho người dùng (SRS 8.6).
 class ApiFailure implements Exception {
@@ -199,7 +200,21 @@ class ApiClient extends ChangeNotifier {
       query: {if (keyword != null && keyword.isNotEmpty) 'keyword': keyword},
       auth: false,
     );
-    return _parseList(result, ServiceCategory.fromJson);
+    final list = _parseList(result, ServiceCategory.fromJson);
+    if (keyword == null || keyword.isEmpty) {
+      ServiceImages.update(list.map((s) => (name: s.name, iconUrl: s.iconUrl)));
+    }
+    return list;
+  }
+
+  /// Tải ảnh dịch vụ 1 lần cho các màn chỉ có tên dịch vụ (thẻ đơn, lời mời của Tasker…).
+  Future<void> ensureServiceImages() async {
+    if (!ServiceImages.isEmpty) return;
+    try {
+      await getCategories();
+    } catch (_) {
+      // Không có mạng: dùng icon mặc định
+    }
   }
 
   // ---------------------------------------------------------------- Đơn hàng
@@ -751,10 +766,14 @@ class ApiClient extends ChangeNotifier {
   Future<http.Response> _guard(Future<http.Response> Function() run) async {
     try {
       return await run();
+    } on HandshakeException {
+      throw const ApiFailure(
+        'Không tạo được kết nối an toàn tới máy chủ. Hãy kiểm tra ngày giờ trên điện thoại rồi thử lại.',
+      );
     } on SocketException {
-      // Ghi kèm địa chỉ API để biết app đang gọi tới đâu (localhost / IP máy tính / 10.0.2.2)
-      throw ApiFailure(
-        'Không kết nối được máy chủ $_baseUrl. Hãy kiểm tra Backend đang chạy và địa chỉ API.',
+      if (kDebugMode) debugPrint('Không kết nối được $_baseUrl');
+      throw const ApiFailure(
+        'Không kết nối được máy chủ. Vui lòng kiểm tra kết nối Internet (Wi-Fi hoặc 4G) rồi thử lại.',
       );
     } on TimeoutException {
       throw const ApiFailure('Máy chủ phản hồi quá lâu. Vui lòng thử lại.');

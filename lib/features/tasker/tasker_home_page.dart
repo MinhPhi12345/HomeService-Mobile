@@ -60,6 +60,7 @@ class TaskerHomePageState extends State<TaskerHomePage> {
 
   Future<void> reload() async {
     final api = AppScope.api(context);
+    unawaited(api.ensureServiceImages()); // ảnh dịch vụ cho thẻ lời mời / đơn
     try {
       final profile = await api.getTaskerProfile();
       if (!mounted) return;

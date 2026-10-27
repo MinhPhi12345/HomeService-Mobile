@@ -1,16 +1,22 @@
 /// Cấu hình chung của app.
 ///
-/// Địa chỉ Backend đọc từ `--dart-define=API_BASE_URL=...` khi chạy:
-/// - Điện thoại thật cắm cáp + `adb reverse tcp:8080 tcp:8080`: giữ mặc định `http://localhost:8080/api`
-/// - Android emulator: `flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080/api`
-/// - Điện thoại qua Wi-Fi: `flutter run --dart-define=API_BASE_URL=http://<IP-máy-tính>:8080/api`
-/// - Bản deploy VPS: `flutter build apk --dart-define=API_BASE_URL=http://<IP-VPS>:8080/api`
+/// Địa chỉ Backend: mặc định là máy chủ thật `https://api.homeservice.id.vn/api`
+/// (`flutter run`, `flutter build apk` không cần thêm gì).
+/// Khi lập trình với Backend chạy trên máy tính, ghi đè bằng `--dart-define=API_BASE_URL=...`:
+/// - Điện thoại cắm cáp + `adb reverse tcp:8080 tcp:8080`: `--dart-define=API_BASE_URL=http://localhost:8080/api`
+/// - Android emulator: `--dart-define=API_BASE_URL=http://10.0.2.2:8080/api`
 class AppConfig {
   AppConfig._();
 
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://localhost:8080/api',
+    defaultValue: 'https://api.homeservice.id.vn/api',
+  );
+
+  /// Phiên bản hiển thị trong mục Tài khoản – khớp `version:` trong pubspec.yaml.
+  static const String appVersion = String.fromEnvironment(
+    'APP_VERSION',
+    defaultValue: '1.0.0',
   );
 
   /// Thời gian chờ tối đa cho 1 request.
@@ -29,18 +35,20 @@ class AppConfig {
   static const Duration bookingRefresh = Duration(seconds: 10);
   static const Duration badgeRefresh = Duration(seconds: 30);
 
-  /// Ảnh do Backend trả về chứa host mà máy đã gửi ảnh lên (vd: localhost:8080 khi tải từ web).
-  /// Đổi sang host của [apiBaseUrl] để điện thoại/emulator mở được.
+  /// Gốc Backend (bỏ "/api"): "https://api.homeservice.id.vn/api" → "https://api.homeservice.id.vn".
+  static String get mediaOrigin =>
+      apiBaseUrl.replaceAll(RegExp(r'/+$'), '').replaceAll(RegExp(r'/api$'), '');
+
+  /// Đường dẫn ảnh Backend lưu ("/uploads/…") → URL đầy đủ theo [apiBaseUrl].
+  /// Ảnh cũ dạng "http://localhost:8080/uploads/…" cũng được trỏ về Backend đang dùng
+  /// để điện thoại / emulator / bản deploy đều mở được.
   static String? mediaUrl(String? url) {
-    if (url == null || url.isEmpty) return null;
-    final media = Uri.tryParse(url);
-    final api = Uri.tryParse(apiBaseUrl);
-    if (media == null || api == null || !media.hasScheme) return url;
-    const localHosts = {'localhost', '127.0.0.1', '10.0.2.2'};
-    if (localHosts.contains(media.host) && media.host != api.host) {
-      return media.replace(host: api.host, port: api.port).toString();
-    }
-    return url;
+    if (url == null || url.trim().isEmpty) return null;
+    final value = url.trim();
+    final legacy = RegExp(r'^https?://[^/]+(/uploads/.*)$', caseSensitive: false).firstMatch(value);
+    if (legacy != null) return '$mediaOrigin${legacy.group(1)}';
+    if (RegExp(r'^https?://', caseSensitive: false).hasMatch(value)) return value;
+    return '$mediaOrigin${value.startsWith('/') ? '' : '/'}$value';
   }
 }
 
