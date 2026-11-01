@@ -379,7 +379,7 @@ class _TrustCarousel extends StatelessWidget {
     (
       Icons.verified_user_rounded,
       'Tasker đã xác thực',
-      'Quản trị viên duyệt CCCD, kỹ năng và khu vực của từng Tasker.',
+      'Quản trị viên duyệt CCCD và kỹ năng của từng Tasker.',
     ),
     (
       Icons.photo_camera_rounded,

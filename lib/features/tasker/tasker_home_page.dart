@@ -333,7 +333,7 @@ class TaskerHomePageState extends State<TaskerHomePage> {
           color: AppColors.primary,
           title: 'Hoàn tất hồ sơ để bắt đầu nhận việc',
           message:
-              'Gửi số CCCD, ảnh CCCD, kỹ năng, khu vực và điểm làm việc. Quản trị viên sẽ duyệt hồ sơ của bạn.',
+              'Gửi số CCCD, ảnh CCCD, kỹ năng và điểm làm việc. Quản trị viên sẽ duyệt hồ sơ của bạn.',
           action: 'Gửi hồ sơ Tasker',
           onTap: () => _open(const TaskerProfilePage()),
         ),
@@ -811,7 +811,7 @@ class _HowItWorks extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const steps = [
-      (Icons.badge_outlined, 'Gửi hồ sơ', 'CCCD, kỹ năng, khu vực và bán kính 3/5/8 km.'),
+      (Icons.badge_outlined, 'Gửi hồ sơ', 'CCCD, kỹ năng, điểm làm việc và bán kính 3/5/8 km.'),
       (Icons.verified_outlined, 'Được duyệt', 'Quản trị viên kiểm tra và kích hoạt tài khoản.'),
       (Icons.toggle_on_outlined, 'Bật nhận đơn', 'Lời mời gửi theo đợt 3 → 5 → 8 km, ai nhận trước làm trước.'),
       (Icons.payments_outlined, 'Nhận tiền', 'Đơn online về ví sau khi khách xác nhận, trừ 20% phí nền tảng.'),

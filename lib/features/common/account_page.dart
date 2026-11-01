@@ -152,7 +152,7 @@ class _AccountPageState extends State<AccountPage> {
                   _MenuItem(
                     icon: Icons.badge_outlined,
                     title: 'Hồ sơ Tasker',
-                    subtitle: 'CCCD, kỹ năng, khu vực và bán kính phục vụ',
+                    subtitle: 'CCCD, kỹ năng, điểm làm việc và bán kính',
                     onTap: () => _open(const TaskerProfilePage()),
                   ),
               ],

@@ -114,7 +114,7 @@ class _RegisterPageState extends State<RegisterPage> {
                 const SizedBox(height: 12),
                 const NoticeBox(
                   message:
-                      'Sau khi đăng ký, bạn cần gửi hồ sơ CCCD, kỹ năng và khu vực làm việc. '
+                      'Sau khi đăng ký, bạn cần gửi hồ sơ CCCD, kỹ năng và điểm làm việc. '
                       'Khi quản trị viên duyệt xong, bạn mới bắt đầu nhận được việc.',
                 ),
               ],
