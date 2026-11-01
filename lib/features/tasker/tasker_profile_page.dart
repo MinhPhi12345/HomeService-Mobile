@@ -13,7 +13,8 @@ import '../../widgets/common.dart';
 import '../../widgets/map_widgets.dart';
 import '../../widgets/photo_picker.dart';
 
-/// US04 – Tasker gửi hồ sơ xác thực: CCCD, kỹ năng, khu vực, điểm làm việc, bán kính.
+/// US04 – Tasker gửi hồ sơ xác thực: CCCD, kỹ năng, điểm làm việc, bán kính.
+/// Khu vực hiển thị trong hồ sơ do Backend tự lấy từ địa chỉ điểm làm việc (SRS 7.9).
 class TaskerProfilePage extends StatefulWidget {
   const TaskerProfilePage({super.key});
 
@@ -29,7 +30,6 @@ class _TaskerProfilePageState extends State<TaskerProfilePage> {
   List<ServiceCategory> _services = const [];
   final Set<String> _skills = {};
   String? _idCardImage;
-  String? _area;
   GeoPoint? _base;
   int _radius = 5;
   bool _loading = true;
@@ -69,9 +69,6 @@ class _TaskerProfilePageState extends State<TaskerProfilePage> {
         _skills
           ..clear()
           ..addAll(profile.skillList);
-        _area = kWorkingAreas.contains(profile.workingArea)
-            ? profile.workingArea
-            : null;
         _baseAddress.text = profile.baseAddress;
         _base = GeoPoint(profile.baseLatitude, profile.baseLongitude);
         _radius = kServiceRadiusKm.contains(profile.serviceRadiusKm)
@@ -119,8 +116,6 @@ class _TaskerProfilePageState extends State<TaskerProfilePage> {
       problem = 'Vui lòng chụp ảnh CCCD.';
     } else if (_skills.isEmpty) {
       problem = 'Vui lòng chọn ít nhất 1 kỹ năng.';
-    } else if (_area == null) {
-      problem = 'Vui lòng chọn khu vực làm việc.';
     } else if (_base == null) {
       problem = 'Vui lòng chọn điểm làm việc trên bản đồ.';
     }
@@ -136,7 +131,6 @@ class _TaskerProfilePageState extends State<TaskerProfilePage> {
         idCardNumber: _idCard.text,
         idCardImageUrl: _idCardImage!,
         skills: _skills.join(', '),
-        workingArea: _area!,
         baseAddress: _baseAddress.text,
         baseLatitude: _base!.latitude,
         baseLongitude: _base!.longitude,
@@ -264,20 +258,12 @@ class _TaskerProfilePageState extends State<TaskerProfilePage> {
         ],
       ),
       const SizedBox(height: 20),
-      const SectionHeader('Khu vực làm việc'),
-      DropdownButtonFormField<String>(
-        initialValue: _area,
-        items: [
-          for (final area in kWorkingAreas)
-            DropdownMenuItem(value: area, child: Text(area)),
-        ],
-        onChanged: (value) => setState(() => _area = value),
-        decoration: appInputDecoration(
-          label: 'Quận / khu vực',
-          icon: Icons.map_outlined,
-        ),
+      const SectionHeader('Điểm làm việc'),
+      const Text(
+        'Hệ thống gửi lời mời theo khoảng cách từ điểm này tới địa chỉ đơn. Khu vực hiển thị trong hồ sơ được lấy tự động từ địa chỉ.',
+        style: AppText.muted,
       ),
-      const SizedBox(height: 14),
+      const SizedBox(height: 10),
       TextFormField(
         controller: _baseAddress,
         validator: Validators.minLength(
@@ -305,6 +291,13 @@ class _TaskerProfilePageState extends State<TaskerProfilePage> {
         icon: Icons.edit_location_alt_outlined,
         onPressed: _pickBase,
       ),
+      if (_existing?.workingArea != null) ...[
+        const SizedBox(height: 8),
+        Text(
+          'Khu vực đang hiển thị: ${_existing!.workingArea}',
+          style: AppText.small,
+        ),
+      ],
       const SizedBox(height: 20),
       const SectionHeader('Bán kính phục vụ'),
       Row(

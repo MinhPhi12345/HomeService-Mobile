@@ -14,6 +14,7 @@ import '../../widgets/common.dart';
 import '../../widgets/date_time_pick.dart';
 import '../../widgets/map_widgets.dart';
 import '../../widgets/review_sheet.dart';
+import '../common/public_profile_page.dart';
 import 'booking_create_page.dart';
 import 'dispute_page.dart';
 import 'payment_page.dart';
@@ -272,20 +273,29 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
     );
   }
 
+  /// Đơn online đã xong việc: tiền khách trả trước đang được HomeService tạm giữ.
+  /// Khách kiểm tra rồi bấm "Xác nhận & chuyển" để giải ngân cho Tasker.
   Future<void> _confirm() async {
     final api = AppScope.api(context);
     final b = _b!;
-    final ok = await confirmDialog(
-      context,
-      title: 'Xác nhận đã hoàn thành?',
-      message:
-          'Tiền ${formatMoney(b.totalPrice)} sẽ được chuyển cho Tasker. Nếu công việc chưa đạt, hãy chọn "Khiếu nại" thay vì xác nhận.',
-      confirmText: 'Xác nhận',
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
+      ),
+      builder: (_) => _ReleaseSheet(booking: b),
     );
-    if (!ok || !mounted) return;
+    if (!mounted) return;
+    if (action == 'dispute') {
+      await _openDispute();
+      return;
+    }
+    if (action != 'confirm') return;
     await _run(
       () => api.confirmBooking(b.id),
-      success: 'Cảm ơn bạn! Đơn đã hoàn tất.',
+      success: 'Đã xác nhận. ${formatMoney(b.totalPrice)} đã được chuyển cho Tasker.',
     );
     if (mounted && (_b?.canReview ?? false)) await _review();
   }
@@ -322,18 +332,14 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
 
   Future<void> _reportReview(Review review) async {
     final api = AppScope.api(context);
-    final ok = await confirmDialog(
+    final sent = await showReportReviewSheet(
       context,
-      title: 'Báo cáo đánh giá?',
-      message:
-          'Quản trị viên sẽ xem xét đánh giá này. Trong lúc chờ, đánh giá tạm không tính vào điểm trung bình.',
-      confirmText: 'Báo cáo',
+      review: review,
+      onSubmit: (reason) => api.reportReview(review.id, reason),
     );
-    if (!ok || !mounted) return;
-    await _run(
-      () => api.reportReview(review.id),
-      success: 'Đã gửi báo cáo tới quản trị viên.',
-    );
+    if (!sent || !mounted) return;
+    showSnack(context, 'Đã gửi báo cáo kèm lý do tới quản trị viên.');
+    await _load(silent: true);
   }
 
   Future<void> _reorder() async {
@@ -408,6 +414,10 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
         const SizedBox(height: 12),
         _ProgressSteps(status: b.status),
       ],
+      if (_PaymentStatusCard.applies(b)) ...[
+        const SizedBox(height: 12),
+        _PaymentStatusCard(booking: b),
+      ],
       if (tracking) ...[
         const SizedBox(height: 16),
         const SectionHeader('Vị trí Tasker'),
@@ -426,6 +436,15 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
           onCall: b.taskerPhone == null
               ? null
               : () => callPhone(context, b.taskerPhone!),
+          onOpenProfile: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => PublicProfilePage(
+                userId: b.taskerId!,
+                fallbackName: b.taskerName,
+                isTasker: true,
+              ),
+            ),
+          ),
         ),
       ],
       const SizedBox(height: 16),
@@ -506,9 +525,11 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
         for (final review in _reviews) ...[
           _ReviewTile(
             review: review,
-            onReport: review.revieweeId == me && !review.isFlagged
+            onReport:
+                review.revieweeId == me && !review.isFlagged && !review.isModerated
                 ? () => _reportReview(review)
                 : null,
+            showModeration: review.revieweeId == me,
           ),
           const SizedBox(height: 8),
         ],
@@ -589,7 +610,11 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
         primary('Tìm Tasker lại', _retry, icon: Icons.refresh_rounded);
         secondary('Hủy đơn', _cancel, color: AppColors.danger);
       case BookingStatus.completed:
-        primary('Xác nhận hoàn thành', _confirm, icon: Icons.task_alt_rounded);
+        primary(
+          'Xác nhận & thanh toán cho Tasker',
+          _confirm,
+          icon: Icons.task_alt_rounded,
+        );
         if (b.canDispute) {
           secondary('Khiếu nại', _openDispute, icon: Icons.gavel_rounded);
         }
@@ -634,6 +659,315 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
 }
 
 // ------------------------------------------------------------------ Thành phần
+
+/// Tóm tắt dòng tiền của đơn: đã trả gì, tiền đang ở đâu, bao giờ chuyển cho Tasker.
+class _PaymentStatusCard extends StatefulWidget {
+  const _PaymentStatusCard({required this.booking});
+
+  final Booking booking;
+
+  static bool applies(Booking b) => _PaymentStatusCardState.content(b) != null;
+
+  @override
+  State<_PaymentStatusCard> createState() => _PaymentStatusCardState();
+}
+
+class _PayContent {
+  const _PayContent(this.color, this.icon, this.title, this.text, [this.timerLabel, this.timerAt]);
+
+  final Color color;
+  final IconData icon;
+  final String title;
+  final String text;
+  final String? timerLabel;
+  final DateTime? timerAt;
+}
+
+class _PaymentStatusCardState extends State<_PaymentStatusCard> {
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (content(widget.booking)?.timerAt != null) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  static _PayContent? content(Booking b) {
+    final total = formatMoney(b.totalPrice);
+    final method = PaymentMethod.label(b.paymentMethod).toLowerCase();
+    switch (b.status) {
+      case BookingStatus.awaitingPayment:
+        return _PayContent(
+          AppColors.warning,
+          Icons.schedule_rounded,
+          'Chưa thanh toán · $total',
+          b.paymentDueAt == null
+              ? 'Thanh toán qua $method để hệ thống bắt đầu tìm Tasker. Bấm “Thanh toán ngay”.'
+              : 'Thanh toán qua $method trước ${formatTime(b.paymentDueAt!)} để hệ thống bắt đầu tìm Tasker. Quá hạn đơn sẽ tự hủy.',
+          'Còn',
+          b.paymentDueAt,
+        );
+      case BookingStatus.pending:
+      case BookingStatus.matched:
+      case BookingStatus.accepted:
+      case BookingStatus.inProgress:
+      case BookingStatus.noTaskerFound:
+        return b.isCash
+            ? _PayContent(
+                AppColors.info,
+                Icons.payments_rounded,
+                'Trả tiền mặt cho Tasker · $total',
+                'Chuẩn bị sẵn tiền mặt và trả trực tiếp cho Tasker khi công việc hoàn thành. Tasker sẽ xác nhận đã nhận tiền trên ứng dụng.',
+              )
+            : _PayContent(
+                AppColors.primaryDark,
+                Icons.lock_rounded,
+                'Đã thanh toán trước · $total',
+                'Bạn đã trả qua $method. HomeService đang tạm giữ, chỉ chuyển cho Tasker khi bạn xác nhận hoàn thành.',
+              );
+      case BookingStatus.completed:
+        return _PayContent(
+          AppColors.warning,
+          Icons.task_alt_rounded,
+          'Tasker đã xong việc · chờ bạn xác nhận thanh toán',
+          'Kiểm tra ảnh trước/sau rồi bấm “Xác nhận & thanh toán cho Tasker” để chuyển $total đang tạm giữ.'
+              '${b.autoConfirmAt == null ? '' : ' Hệ thống tự chuyển lúc ${formatDateTime(b.autoConfirmAt!)} nếu bạn không phản hồi.'}',
+          'Tự chuyển sau',
+          b.autoConfirmAt,
+        );
+      case BookingStatus.paid:
+        return _PayContent(
+          AppColors.success,
+          Icons.check_circle_rounded,
+          'Đã thanh toán xong',
+          b.isCash
+              ? 'Bạn đã trả $total tiền mặt cho Tasker.'
+              : '$total đã được chuyển cho Tasker. Cảm ơn bạn!',
+        );
+      case BookingStatus.disputed:
+        return _PayContent(
+          AppColors.warning,
+          Icons.gpp_maybe_rounded,
+          'Tiền đang được giữ để xử lý khiếu nại',
+          b.isCash
+              ? 'Quản trị viên đang xem xét khiếu nại của bạn.'
+              : '$total vẫn được HomeService tạm giữ cho đến khi có kết quả khiếu nại.',
+        );
+      case BookingStatus.paymentOverdue:
+        return _PayContent(
+          AppColors.danger,
+          Icons.payments_rounded,
+          'Cần thanh toán · $total',
+          'Tasker báo bạn chưa trả tiền mặt. Bấm “Thanh toán” để trả online, hoặc khiếu nại nếu bạn đã trả.',
+        );
+      case BookingStatus.cancelled:
+      case BookingStatus.expired:
+      case BookingStatus.refunded:
+        if (b.isCash && b.cancellationFee > 0 && b.paymentStatus == null) {
+          return _PayContent(
+            AppColors.danger,
+            Icons.payments_rounded,
+            'Cần trả phí hủy · ${formatMoney(b.cancellationFee)}',
+            'Bấm “Thanh toán phí hủy” để trả bằng ví điện tử hoặc thẻ.',
+          );
+        }
+        if (b.paymentStatus == 5 || b.paymentStatus == 6) {
+          return _PayContent(
+            AppColors.info,
+            Icons.replay_rounded,
+            b.paymentStatus == 5 ? 'Đã hoàn tiền toàn bộ' : 'Đã hoàn tiền một phần',
+            'Tiền được hoàn về phương thức bạn đã thanh toán.',
+          );
+        }
+        return null;
+      default:
+        return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = content(widget.booking);
+    if (c == null) return const SizedBox.shrink();
+    final left = c.timerAt?.difference(DateTime.now());
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: c.color.withValues(alpha: 0.45)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.soft(c.color),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(c.icon, color: c.color, size: 22),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  c.title,
+                  style: AppText.body.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 3),
+                Text(c.text, style: AppText.muted),
+              ],
+            ),
+          ),
+          if (left != null && c.timerLabel != null) ...[
+            const SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(c.timerLabel!, style: AppText.small),
+                const SizedBox(height: 2),
+                Text(
+                  left <= Duration.zero ? '00:00' : formatCountdown(left),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                    color: c.color,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Bảng xác nhận hoàn thành & chuyển tiền đang tạm giữ cho Tasker.
+/// Trả về 'confirm' | 'dispute' | null.
+class _ReleaseSheet extends StatefulWidget {
+  const _ReleaseSheet({required this.booking});
+
+  final Booking booking;
+
+  @override
+  State<_ReleaseSheet> createState() => _ReleaseSheetState();
+}
+
+class _ReleaseSheetState extends State<_ReleaseSheet> {
+  bool _agree = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final b = widget.booking;
+    final total = formatMoney(b.totalPrice);
+    Widget step(IconData icon, String label, String value, {bool highlight = false}) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: highlight ? AppColors.primaryDark : AppColors.inkSoft),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              label,
+              style: highlight
+                  ? AppText.body.copyWith(fontWeight: FontWeight.w700)
+                  : AppText.muted,
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              color: highlight ? AppColors.primaryDark : AppColors.ink,
+            ),
+          ),
+        ],
+      ),
+    );
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Xác nhận & thanh toán cho Tasker', style: AppText.title),
+            const SizedBox(height: 6),
+            Text(
+              'Tiền bạn trả trước đang được HomeService tạm giữ. Khi bạn xác nhận, khoản này được chuyển cho ${b.taskerName ?? 'Tasker'}.',
+              style: AppText.muted,
+            ),
+            const SizedBox(height: 14),
+            AppCard(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              child: Column(
+                children: [
+                  step(Icons.account_balance_wallet_outlined, 'Bạn đã thanh toán trước', total),
+                  step(Icons.lock_outline_rounded, 'HomeService đang tạm giữ', total),
+                  const Divider(height: 8),
+                  step(
+                    Icons.send_rounded,
+                    'Chuyển cho Tasker khi bạn xác nhận',
+                    total,
+                    highlight: true,
+                  ),
+                ],
+              ),
+            ),
+            if (b.autoConfirmAt != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Nếu bạn không xác nhận, hệ thống tự chuyển tiền lúc ${formatDateTime(b.autoConfirmAt!)}.',
+                style: AppText.small,
+              ),
+            ],
+            const SizedBox(height: 8),
+            CheckboxListTile(
+              value: _agree,
+              onChanged: (v) => setState(() => _agree = v ?? false),
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              activeColor: AppColors.primary,
+              title: const Text(
+                'Tôi đã kiểm tra ảnh trước/sau và hài lòng với công việc.',
+                style: AppText.body,
+              ),
+            ),
+            const SizedBox(height: 8),
+            PrimaryButton(
+              label: 'Xác nhận & chuyển $total',
+              icon: Icons.task_alt_rounded,
+              onPressed: _agree ? () => Navigator.of(context).pop('confirm') : null,
+            ),
+            if (b.canDispute) ...[
+              const SizedBox(height: 10),
+              SecondaryButton(
+                label: 'Chưa hài lòng – Khiếu nại',
+                icon: Icons.gavel_rounded,
+                color: AppColors.danger,
+                onPressed: () => Navigator.of(context).pop('dispute'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _StatusHeader extends StatelessWidget {
   const _StatusHeader({required this.booking});
@@ -895,55 +1229,79 @@ class _TaskerCard extends StatelessWidget {
     required this.booking,
     required this.reviews,
     required this.onCall,
+    required this.onOpenProfile,
   });
 
   final Booking booking;
   final ReviewSummary? reviews;
   final VoidCallback? onCall;
 
+  /// US26 – mở hồ sơ Tasker (các đánh giá chỉ hiện trong hồ sơ, không hiện trong đơn).
+  final VoidCallback onOpenProfile;
+
   @override
   Widget build(BuildContext context) {
     final name = booking.taskerName ?? 'Tasker';
     final rating = reviews?.ratingAverage;
     return AppCard(
-      child: Row(
+      onTap: onOpenProfile,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          UserAvatar(name: name, size: 52),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  style: AppText.body.copyWith(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 15,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                if (rating != null)
-                  Row(
-                    children: [
-                      RatingStars(rating: rating, size: 15),
-                      const SizedBox(width: 6),
-                      Text(
-                        '${rating.toStringAsFixed(1)} · ${reviews!.reviewCount} đánh giá',
-                        style: AppText.small,
+          Row(
+            children: [
+              UserAvatar(name: name, size: 52),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: AppText.body.copyWith(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
                       ),
-                    ],
-                  )
-                else
-                  const Text('Tasker mới', style: AppText.small),
-              ],
-            ),
+                    ),
+                    const SizedBox(height: 4),
+                    if (rating != null)
+                      Row(
+                        children: [
+                          RatingStars(rating: rating, size: 15),
+                          const SizedBox(width: 6),
+                          Text(
+                            '${rating.toStringAsFixed(1)} · ${reviews!.reviewCount} đánh giá',
+                            style: AppText.small,
+                          ),
+                        ],
+                      )
+                    else
+                      const Text('Tasker mới', style: AppText.small),
+                  ],
+                ),
+              ),
+              if (onCall != null)
+                IconButton.filled(
+                  onPressed: onCall,
+                  style: IconButton.styleFrom(backgroundColor: AppColors.primary),
+                  icon: const Icon(Icons.call_rounded, color: Colors.white),
+                ),
+            ],
           ),
-          if (onCall != null)
-            IconButton.filled(
-              onPressed: onCall,
-              style: IconButton.styleFrom(backgroundColor: AppColors.primary),
-              icon: const Icon(Icons.call_rounded, color: Colors.white),
-            ),
+          const Divider(height: 22),
+          Row(
+            children: [
+              const Icon(Icons.person_search_rounded, size: 18, color: AppColors.primaryDark),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Xem hồ sơ & đánh giá của Tasker',
+                  style: AppText.label.copyWith(color: AppColors.primaryDark),
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+            ],
+          ),
         ],
       ),
     );
@@ -1031,10 +1389,17 @@ class _DisputeCard extends StatelessWidget {
 }
 
 class _ReviewTile extends StatelessWidget {
-  const _ReviewTile({required this.review, this.onReport});
+  const _ReviewTile({
+    required this.review,
+    this.onReport,
+    this.showModeration = false,
+  });
 
   final Review review;
   final VoidCallback? onReport;
+
+  /// Chỉ người được đánh giá (người có quyền báo cáo) mới thấy lý do báo cáo / kết quả kiểm duyệt.
+  final bool showModeration;
 
   @override
   Widget build(BuildContext context) {
@@ -1081,6 +1446,7 @@ class _ReviewTile extends StatelessWidget {
                 ),
             ],
           ),
+          if (showModeration) ReviewModerationInfo(review: review),
         ],
       ),
     );

@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
 import '../../core/app_scope.dart';
+import '../../core/models.dart';
 import '../../core/validators.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import '../../widgets/motion.dart';
 import 'auth_header.dart';
+import 'forgot_password_page.dart';
 import 'register_page.dart';
+import 'verify_email_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -42,9 +45,43 @@ class _LoginPageState extends State<LoginPage> {
       // Đăng nhập thành công: AuthGate tự chuyển sang màn hình theo vai trò.
       await AppScope.api(context).login(_email.text, _password.text);
     } catch (error) {
-      if (mounted) setState(() => _error = errorMessage(error));
+      if (!mounted) return;
+      if (error is ApiFailure && error.isEmailNotVerified) {
+        // Tài khoản chưa xác thực email: server đã gửi mã OTP → mở màn nhập mã
+        final body = error.body!;
+        final email = body['email'] as String? ?? _email.text.trim().toLowerCase();
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => VerifyEmailPage(
+              sent: OtpSent(
+                email: email,
+                maskedEmail: body['maskedEmail'] as String? ?? email,
+                resendAfterSeconds: (body['resendAfterSeconds'] as num?)?.toInt() ?? 0,
+              ),
+              notice: 'Tài khoản chưa xác thực email. Nhập mã OTP để kích hoạt rồi đăng nhập.',
+            ),
+          ),
+        );
+      } else {
+        setState(() => _error = errorMessage(error));
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _forgot() async {
+    final email = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => ForgotPasswordPage(initialEmail: _email.text.trim()),
+      ),
+    );
+    if (email != null && mounted) {
+      setState(() {
+        _email.text = email;
+        _password.clear();
+        _error = null;
+      });
     }
   }
 
@@ -105,15 +142,22 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                   ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: _loading ? null : _forgot,
+                      child: const Text('Quên mật khẩu?'),
+                    ),
+                  ),
                   if (_error != null) ...[
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 4),
                     NoticeBox(
                       message: _error!,
                       color: AppColors.danger,
                       icon: Icons.error_outline_rounded,
                     ),
                   ],
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 14),
                   FadeSlideIn(
                     delay: const Duration(milliseconds: 340),
                     child: PrimaryButton(

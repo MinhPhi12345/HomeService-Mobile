@@ -8,6 +8,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import 'auth_header.dart';
 import 'login_page.dart';
+import 'verify_email_page.dart';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key, this.initialRole = 0});
@@ -47,12 +48,17 @@ class _RegisterPageState extends State<RegisterPage> {
       _error = null;
     });
     try {
-      await AppScope.api(context).register(
+      final sent = await AppScope.api(context).register(
         fullName: _name.text,
         email: _email.text,
         password: _password.text,
         phoneNumber: _phone.text,
         role: _role,
+      );
+      // Tài khoản chưa kích hoạt: nhập mã OTP gửi về email
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => VerifyEmailPage(sent: sent)),
       );
     } catch (error) {
       if (mounted) setState(() => _error = errorMessage(error));
@@ -108,7 +114,7 @@ class _RegisterPageState extends State<RegisterPage> {
                 const SizedBox(height: 12),
                 const NoticeBox(
                   message:
-                      'Sau khi đăng ký, bạn cần gửi hồ sơ CCCD, kỹ năng và khu vực làm việc. '
+                      'Sau khi đăng ký, bạn cần gửi hồ sơ CCCD, kỹ năng và điểm làm việc. '
                       'Khi quản trị viên duyệt xong, bạn mới bắt đầu nhận được việc.',
                 ),
               ],

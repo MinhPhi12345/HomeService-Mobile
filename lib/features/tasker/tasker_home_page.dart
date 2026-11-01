@@ -12,6 +12,7 @@ import '../../core/models.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import '../../widgets/motion.dart';
+import '../common/public_profile_page.dart';
 import 'job_detail_page.dart';
 import 'tasker_profile_page.dart';
 import 'wallet_page.dart';
@@ -109,7 +110,27 @@ class TaskerHomePageState extends State<TaskerHomePage> {
     }
   }
 
+  /// Chưa đủ ký quỹ: nhắc nạp tiền thay vì gọi API (server cũng chặn).
+  Future<void> _askDeposit({required String reason}) async {
+    final wallet = _wallet;
+    if (wallet == null) return;
+    final go = await confirmDialog(
+      context,
+      title: 'Cần ký quỹ để nhận đơn',
+      message:
+          '$reason\n\nVí cần tối thiểu ${formatMoney(wallet.minDeposit)} khả dụng. '
+          'Hiện có ${formatMoney(wallet.availableBalance)}, cần nạp thêm ${formatMoney(wallet.depositShortfall)}.',
+      confirmText: 'Nạp tiền ngay',
+      cancelText: 'Để sau',
+    );
+    if (go && mounted) await _open(WalletTopUpPage(wallet: wallet));
+  }
+
   Future<void> _toggle(bool value) async {
+    if (value && _wallet != null && !_wallet!.meetsDeposit) {
+      await _askDeposit(reason: 'Bạn chưa đủ ký quỹ nên chưa thể bật nhận đơn.');
+      return;
+    }
     final api = AppScope.api(context);
     setState(() => _toggling = true);
     try {
@@ -141,6 +162,10 @@ class TaskerHomePageState extends State<TaskerHomePage> {
   }
 
   Future<void> _accept(TaskerOffer offer) async {
+    if (_wallet != null && !_wallet!.meetsDeposit) {
+      await _askDeposit(reason: 'Số dư ví đã xuống dưới mức ký quỹ nên chưa nhận được đơn này.');
+      return;
+    }
     final api = AppScope.api(context);
     final navigator = Navigator.of(context);
     setState(() => _acting.add(offer.offerId));
@@ -308,7 +333,7 @@ class TaskerHomePageState extends State<TaskerHomePage> {
           color: AppColors.primary,
           title: 'Hoàn tất hồ sơ để bắt đầu nhận việc',
           message:
-              'Gửi số CCCD, ảnh CCCD, kỹ năng, khu vực và điểm làm việc. Quản trị viên sẽ duyệt hồ sơ của bạn.',
+              'Gửi số CCCD, ảnh CCCD, kỹ năng và điểm làm việc. Quản trị viên sẽ duyệt hồ sơ của bạn.',
           action: 'Gửi hồ sơ Tasker',
           onTap: () => _open(const TaskerProfilePage()),
         ),
@@ -352,6 +377,7 @@ class TaskerHomePageState extends State<TaskerHomePage> {
         busy: _toggling,
         radiusKm: profile.serviceRadiusKm,
         area: profile.workingArea,
+        depositOk: wallet?.meetsDeposit ?? true,
         onChanged: _toggle,
       ),
       const SizedBox(height: 12),
@@ -380,18 +406,21 @@ class TaskerHomePageState extends State<TaskerHomePage> {
           ),
         ],
       ),
-      if (wallet != null && wallet.availableBalance < 50000) ...[
+      if (wallet != null && !wallet.meetsDeposit) ...[
         const SizedBox(height: 12),
         NoticeBox(
+          title: 'Chưa đủ ký quỹ để nhận đơn',
           message:
-              'Số dư dưới 50.000 đ: bạn sẽ không nhận được đơn tiền mặt vì không đủ tiền trừ chiết khấu.',
+              'Ví cần tối thiểu ${formatMoney(wallet.minDeposit)} khả dụng thì mới bật nhận đơn và nhận được lời mời. '
+              'Bạn cần nạp thêm ${formatMoney(wallet.depositShortfall)}.',
           color: AppColors.warning,
           icon: Icons.warning_amber_rounded,
-          action: SecondaryButton(
-            label: 'Nạp tiền',
+          action: PrimaryButton(
+            label: 'Nạp tiền ngay',
+            icon: Icons.add_rounded,
             expand: false,
             color: AppColors.warning,
-            onPressed: () => _open(const WalletPage()),
+            onPressed: () => _open(WalletTopUpPage(wallet: wallet)),
           ),
         ),
       ],
@@ -403,10 +432,12 @@ class TaskerHomePageState extends State<TaskerHomePage> {
             : StatusChip(label: '${_offers.length}', color: AppColors.accent),
       ),
       if (!profile.isAvailable)
-        const EmptyView(
+        EmptyView(
           icon: Icons.toggle_off_outlined,
           title: 'Bạn đang tắt nhận đơn',
-          message: 'Bật "Sẵn sàng nhận đơn" để bắt đầu nhận lời mời.',
+          message: wallet != null && !wallet.meetsDeposit
+              ? 'Nạp đủ ký quỹ ${formatMoney(wallet.minDeposit)} rồi bật "Sẵn sàng nhận đơn" để bắt đầu nhận lời mời.'
+              : 'Bật "Sẵn sàng nhận đơn" để bắt đầu nhận lời mời.',
         )
       else if (_offers.isEmpty)
         const _WaitingRadar()
@@ -417,6 +448,11 @@ class TaskerHomePageState extends State<TaskerHomePage> {
             busy: _acting.contains(offer.offerId),
             onAccept: () => _accept(offer),
             onReject: () => _reject(offer),
+            onOpenCustomer: offer.customerId == 0
+                ? null
+                : () => _open(
+                    PublicProfilePage(userId: offer.customerId),
+                  ),
           ),
           const SizedBox(height: 12),
         ],
@@ -431,12 +467,14 @@ class _AvailabilityCard extends StatelessWidget {
     required this.radiusKm,
     required this.area,
     required this.onChanged,
+    this.depositOk = true,
   });
 
   final bool available;
   final bool busy;
   final int radiusKm;
   final String? area;
+  final bool depositOk;
   final ValueChanged<bool> onChanged;
 
   @override
@@ -474,6 +512,25 @@ class _AvailabilityCard extends StatelessWidget {
                     color: Colors.white.withValues(alpha: 0.88),
                   ),
                 ),
+                if (!depositOk) ...[
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      const Icon(Icons.lock_outline_rounded, color: Colors.white, size: 16),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          'Cần nạp đủ ký quỹ để bật',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.95),
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
@@ -543,12 +600,16 @@ class _OfferCard extends StatelessWidget {
     required this.busy,
     required this.onAccept,
     required this.onReject,
+    this.onOpenCustomer,
   });
 
   final TaskerOffer offer;
   final bool busy;
   final VoidCallback onAccept;
   final VoidCallback onReject;
+
+  /// US26 – mở hồ sơ khách (các đánh giá chỉ hiện trong hồ sơ).
+  final VoidCallback? onOpenCustomer;
 
   @override
   Widget build(BuildContext context) {
@@ -621,12 +682,25 @@ class _OfferCard extends StatelessWidget {
           ),
           if (offer.note != null)
             InfoRow(icon: Icons.sticky_note_2_outlined, text: offer.note!),
-          if (offer.customerRatingAverage != null)
-            InfoRow(
-              icon: Icons.star_rounded,
-              text:
-                  'Khách được đánh giá ${offer.customerRatingAverage!.toStringAsFixed(1)}★',
-            ),
+          InfoRow(
+            icon: Icons.star_rounded,
+            text: offer.customerRatingAverage == null
+                ? 'Khách chưa có đánh giá'
+                : 'Khách được đánh giá ${offer.customerRatingAverage!.toStringAsFixed(1)}★ · ${offer.customerReviewCount} lượt',
+            trailing: onOpenCustomer == null
+                ? null
+                : InkWell(
+                    onTap: onOpenCustomer,
+                    borderRadius: BorderRadius.circular(8),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      child: Text(
+                        'Xem hồ sơ',
+                        style: AppText.label.copyWith(color: AppColors.primaryDark),
+                      ),
+                    ),
+                  ),
+          ),
           const Divider(height: 22),
           Row(
             children: [
@@ -737,7 +811,7 @@ class _HowItWorks extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const steps = [
-      (Icons.badge_outlined, 'Gửi hồ sơ', 'CCCD, kỹ năng, khu vực và bán kính 3/5/8 km.'),
+      (Icons.badge_outlined, 'Gửi hồ sơ', 'CCCD, kỹ năng, điểm làm việc và bán kính 3/5/8 km.'),
       (Icons.verified_outlined, 'Được duyệt', 'Quản trị viên kiểm tra và kích hoạt tài khoản.'),
       (Icons.toggle_on_outlined, 'Bật nhận đơn', 'Lời mời gửi theo đợt 3 → 5 → 8 km, ai nhận trước làm trước.'),
       (Icons.payments_outlined, 'Nhận tiền', 'Đơn online về ví sau khi khách xác nhận, trừ 20% phí nền tảng.'),

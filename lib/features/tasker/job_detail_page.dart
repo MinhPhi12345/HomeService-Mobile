@@ -14,6 +14,7 @@ import '../../widgets/common.dart';
 import '../../widgets/map_widgets.dart';
 import '../../widgets/photo_picker.dart';
 import '../../widgets/review_sheet.dart';
+import '../common/public_profile_page.dart';
 import 'respond_dispute_page.dart';
 
 /// US18, US19, US26, US35, US36 – Chi tiết việc của Tasker.
@@ -255,18 +256,14 @@ class _JobDetailPageState extends State<JobDetailPage> {
 
   Future<void> _reportReview(Review review) async {
     final api = AppScope.api(context);
-    final ok = await confirmDialog(
+    final sent = await showReportReviewSheet(
       context,
-      title: 'Báo cáo đánh giá?',
-      message:
-          'Quản trị viên sẽ xem xét. Trong lúc chờ, đánh giá này tạm không tính vào điểm trung bình của bạn.',
-      confirmText: 'Báo cáo',
+      review: review,
+      onSubmit: (reason) => api.reportReview(review.id, reason),
     );
-    if (!ok || !mounted) return;
-    await _run(
-      () => api.reportReview(review.id),
-      success: 'Đã gửi báo cáo tới quản trị viên.',
-    );
+    if (!sent || !mounted) return;
+    showSnack(context, 'Đã gửi báo cáo kèm lý do tới quản trị viên.');
+    await _load(silent: true);
   }
 
   /// Bottom sheet chụp 1 ảnh, trả URL đã tải lên.
@@ -450,6 +447,22 @@ class _JobDetailPageState extends State<JobDetailPage> {
                   ),
               ],
             ),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => PublicProfilePage(
+                      userId: b.customerId,
+                      fallbackName: b.customerName,
+                    ),
+                  ),
+                ),
+                icon: const Icon(Icons.person_search_rounded, size: 18),
+                label: const Text('Xem hồ sơ & đánh giá của khách'),
+              ),
+            ),
             if (b.hasLocation) ...[
               const SizedBox(height: 12),
               PinMap(
@@ -592,18 +605,22 @@ class _JobDetailPageState extends State<JobDetailPage> {
                   const SizedBox(height: 6),
                   Text(review.comment!, style: AppText.body),
                 ],
-                if (review.revieweeId == me)
+                if (review.revieweeId == me && review.isModerated)
+                  ReviewModerationInfo(review: review)
+                else if (review.revieweeId == me)
                   Align(
                     alignment: Alignment.centerRight,
                     child: review.isFlagged
-                        ? const Padding(
-                            padding: EdgeInsets.only(top: 8),
-                            child: StatusChip(
-                              label: 'Đang được xem xét',
-                              color: AppColors.warning,
-                              dense: true,
-                            ),
-                          )
+                        ? (review.reportReason != null
+                              ? ReviewModerationInfo(review: review)
+                              : const Padding(
+                                  padding: EdgeInsets.only(top: 8),
+                                  child: StatusChip(
+                                    label: 'Đang được xem xét',
+                                    color: AppColors.warning,
+                                    dense: true,
+                                  ),
+                                ))
                         : TextButton.icon(
                             onPressed: _acting ? null : () => _reportReview(review),
                             icon: const Icon(Icons.flag_outlined, size: 16),

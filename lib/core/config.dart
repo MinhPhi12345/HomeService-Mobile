@@ -52,20 +52,5 @@ class AppConfig {
   }
 }
 
-/// Khu vực làm việc Backend chấp nhận (Common/WorkingAreas.cs).
-const List<String> kWorkingAreas = [
-  'Quận 1',
-  'Quận 3',
-  'Quận 4',
-  'Quận 5',
-  'Quận 7',
-  'Quận 10',
-  'Bình Thạnh',
-  'Phú Nhuận',
-  'Gò Vấp',
-  'Tân Bình',
-  'Thủ Đức',
-];
-
 /// Bán kính phục vụ Tasker được chọn (km).
 const List<int> kServiceRadiusKm = [3, 5, 8];

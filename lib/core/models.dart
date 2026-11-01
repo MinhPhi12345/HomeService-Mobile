@@ -213,6 +213,8 @@ class TaskerOffer {
     required this.quantity,
     this.note,
     this.customerRatingAverage,
+    this.customerId = 0,
+    this.customerReviewCount = 0,
   });
 
   final int offerId;
@@ -230,6 +232,10 @@ class TaskerOffer {
   final int quantity;
   final String? note;
   final double? customerRatingAverage;
+
+  /// US26 – để mở hồ sơ khách (kèm đánh giá) từ lời mời.
+  final int customerId;
+  final int customerReviewCount;
 
   double get earning => totalPrice - estimatedCommission;
 
@@ -249,6 +255,8 @@ class TaskerOffer {
     quantity: _in(json['quantity']) ?? 1,
     note: _sn(json['note']),
     customerRatingAverage: _dn(json['customerRatingAverage']),
+    customerId: _i(json['customerId']),
+    customerReviewCount: _i(json['customerReviewCount']),
   );
 }
 
@@ -375,6 +383,9 @@ class Review {
     required this.comment,
     required this.isFlagged,
     required this.createdAt,
+    this.reportReason,
+    this.moderationNote,
+    this.moderatedAt,
   });
 
   final int id;
@@ -388,6 +399,16 @@ class Review {
   final bool isFlagged;
   final DateTime createdAt;
 
+  /// US27 – lý do người trong đơn báo cáo (chỉ Backend trả cho người trong đơn).
+  final String? reportReason;
+
+  /// US27 – ghi chú của quản trị viên khi giữ lại đánh giá bị báo cáo.
+  final String? moderationNote;
+  final DateTime? moderatedAt;
+
+  /// Quản trị viên đã xem xét và giữ lại → không báo cáo lại được.
+  bool get isModerated => moderatedAt != null;
+
   factory Review.fromJson(Json json) => Review(
     id: _i(json['id']),
     bookingId: _i(json['bookingId']),
@@ -399,6 +420,9 @@ class Review {
     comment: _sn(json['comment']),
     isFlagged: _b(json['isFlagged']),
     createdAt: _dt(json['createdAt']),
+    reportReason: _sn(json['reportReason']),
+    moderationNote: _sn(json['moderationNote']),
+    moderatedAt: _dtn(json['moderatedAt']),
   );
 }
 
@@ -416,6 +440,55 @@ class ReviewSummary {
   factory ReviewSummary.fromJson(Json json) => ReviewSummary(
     reviewCount: _i(json['reviewCount']),
     ratingAverage: _dn(json['ratingAverage']),
+    reviews: _list(json['reviews'], Review.fromJson),
+  );
+}
+
+/// US26 – GET /api/public-profiles/{userId}: hồ sơ của bên còn lại trong đơn kèm
+/// các đánh giá đã nhận (người viết đánh giá chỉ hiện tên gọi).
+class PublicProfile {
+  const PublicProfile({
+    required this.userId,
+    required this.displayName,
+    required this.role,
+    required this.memberSince,
+    required this.completedBookings,
+    required this.reviewCount,
+    required this.reviews,
+    this.avatarUrl,
+    this.ratingAverage,
+    this.isVerified,
+    this.workingArea,
+    this.skills,
+  });
+
+  final int userId;
+  final String displayName;
+  final int role;
+  final String? avatarUrl;
+  final DateTime memberSince;
+  final int completedBookings;
+  final int reviewCount;
+  final double? ratingAverage;
+  final bool? isVerified;
+  final String? workingArea;
+  final String? skills;
+  final List<Review> reviews;
+
+  bool get isTasker => role == 1;
+
+  factory PublicProfile.fromJson(Json json) => PublicProfile(
+    userId: _i(json['userId']),
+    displayName: _s(json['displayName']),
+    role: _i(json['role']),
+    avatarUrl: _sn(json['avatarUrl']),
+    memberSince: _dt(json['memberSince']),
+    completedBookings: _i(json['completedBookings']),
+    reviewCount: _i(json['reviewCount']),
+    ratingAverage: _dn(json['ratingAverage']),
+    isVerified: json['isVerified'] as bool?,
+    workingArea: _sn(json['workingArea']),
+    skills: _sn(json['skills']),
     reviews: _list(json['reviews'], Review.fromJson),
   );
 }
@@ -543,16 +616,53 @@ class Wallet {
     required this.balance,
     required this.reservedAmount,
     required this.availableBalance,
+    this.minDeposit = 0,
+    this.meetsDeposit = true,
   });
 
   final double balance;
   final double reservedAmount;
   final double availableBalance;
 
+  /// Mức ký quỹ tối thiểu (số dư khả dụng) để Tasker bật nhận đơn / nhận đơn.
+  final double minDeposit;
+  final bool meetsDeposit;
+
+  /// Số tiền còn thiếu để đạt mức ký quỹ.
+  double get depositShortfall =>
+      meetsDeposit ? 0 : (minDeposit - availableBalance).clamp(0, double.infinity).toDouble();
+
   factory Wallet.fromJson(Json json) => Wallet(
     balance: _d(json['balance']),
     reservedAmount: _d(json['reservedAmount']),
     availableBalance: _d(json['availableBalance']),
+    minDeposit: _d(json['minDeposit']),
+    meetsDeposit: json['meetsDeposit'] is bool ? json['meetsDeposit'] as bool : true,
+  );
+}
+
+/// Kết quả gửi mã OTP qua email.
+class OtpSent {
+  const OtpSent({
+    required this.maskedEmail,
+    required this.resendAfterSeconds,
+    this.email,
+    this.expiresAt,
+  });
+
+  /// Email đã che bớt, vd. mi*****@demo.vn
+  final String maskedEmail;
+  final int resendAfterSeconds;
+
+  /// Email đầy đủ (khi đăng ký / quên mật khẩu) để gửi kèm lúc nhập mã.
+  final String? email;
+  final DateTime? expiresAt;
+
+  factory OtpSent.fromJson(Json json, {String? email}) => OtpSent(
+    maskedEmail: _sn(json['maskedEmail']) ?? email ?? '',
+    resendAfterSeconds: _i(json['resendAfterSeconds']),
+    email: _sn(json['email']) ?? email,
+    expiresAt: _dtn(json['expiresAt']),
   );
 }
 
