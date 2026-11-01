@@ -10,6 +10,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import '../tasker/tasker_profile_page.dart';
 import '../tasker/wallet_page.dart';
+import 'change_password_page.dart';
 import 'edit_profile_page.dart';
 import 'payment_history_page.dart';
 
@@ -140,6 +141,12 @@ class _AccountPageState extends State<AccountPage> {
                   title: 'Thông tin cá nhân',
                   subtitle: 'Họ tên, số điện thoại, địa chỉ, ảnh đại diện',
                   onTap: () => _open(const EditProfilePage()),
+                ),
+                _MenuItem(
+                  icon: Icons.lock_reset_rounded,
+                  title: 'Đổi mật khẩu',
+                  subtitle: 'Xác nhận bằng mã OTP gửi về email',
+                  onTap: () => _open(const ChangePasswordPage()),
                 ),
                 if (user.isTasker)
                   _MenuItem(

@@ -13,13 +13,25 @@ import 'service_images.dart';
 
 /// Lỗi đã được dịch sang câu tiếng Việt để hiện thẳng cho người dùng (SRS 8.6).
 class ApiFailure implements Exception {
-  const ApiFailure(this.message, {this.statusCode});
+  const ApiFailure(this.message, {this.statusCode, this.body});
 
   final String message;
   final int? statusCode;
 
+  /// Nội dung JSON lỗi gốc (nếu có) – vd. 403 EMAIL_NOT_VERIFIED kèm email.
+  final Map<String, dynamic>? body;
+
   bool get isNotFound => statusCode == 404;
   bool get isConflict => statusCode == 409;
+
+  /// Đăng nhập đúng mật khẩu nhưng chưa xác thực email bằng OTP.
+  bool get isEmailNotVerified => statusCode == 403 && body?['code'] == 'EMAIL_NOT_VERIFIED';
+
+  /// Số giây phải chờ khi gửi lại mã quá nhanh (429 "Vui lòng đợi 42 giây…").
+  int? get waitSeconds {
+    final m = RegExp(r'đợi (\d+) giây').firstMatch(message);
+    return m == null ? null : int.parse(m.group(1)!);
+  }
 
   @override
   String toString() => message;
@@ -108,7 +120,8 @@ class ApiClient extends ChangeNotifier {
     return _saveSession(result as Json);
   }
 
-  Future<UserSession> register({
+  /// Đăng ký: tạo tài khoản CHƯA kích hoạt và gửi mã OTP về email (chưa đăng nhập).
+  Future<OtpSent> register({
     required String fullName,
     required String email,
     required String password,
@@ -127,8 +140,73 @@ class ApiClient extends ChangeNotifier {
       },
       auth: false,
     );
+    return OtpSent.fromJson(result as Json, email: email.trim().toLowerCase());
+  }
+
+  // ---------------------------------------------------------------- Mã OTP qua email
+
+  /// Nhập đúng mã OTP → kích hoạt tài khoản và đăng nhập luôn.
+  Future<UserSession> verifyEmail(String email, String code) async {
+    final result = await _send(
+      'POST',
+      '/auth/verify-email',
+      body: {'email': email.trim().toLowerCase(), 'code': code},
+      auth: false,
+    );
     return _saveSession(result as Json);
   }
+
+  Future<OtpSent> resendVerification(String email) async => OtpSent.fromJson(
+    await _send(
+      'POST',
+      '/auth/resend-verification',
+      body: {'email': email.trim().toLowerCase()},
+      auth: false,
+    ) as Json,
+    email: email.trim().toLowerCase(),
+  );
+
+  /// Quên mật khẩu – bước 1: gửi mã OTP về email.
+  Future<OtpSent> forgotPassword(String email) async => OtpSent.fromJson(
+    await _send(
+      'POST',
+      '/auth/forgot-password',
+      body: {'email': email.trim().toLowerCase()},
+      auth: false,
+    ) as Json,
+    email: email.trim().toLowerCase(),
+  );
+
+  /// Quên mật khẩu – bước 2: mã OTP + mật khẩu mới.
+  Future<void> resetPassword(String email, String code, String newPassword) => _send(
+    'POST',
+    '/auth/reset-password',
+    body: {
+      'email': email.trim().toLowerCase(),
+      'code': code,
+      'newPassword': newPassword,
+    },
+    auth: false,
+  );
+
+  /// Đổi mật khẩu khi đã đăng nhập – bước 1: gửi mã OTP về email tài khoản.
+  Future<OtpSent> sendChangePasswordOtp() async =>
+      OtpSent.fromJson(await _send('POST', '/profile/password/otp') as Json);
+
+  /// Đổi mật khẩu – bước 2: mật khẩu hiện tại + mã OTP + mật khẩu mới.
+  Future<void> changePassword({
+    required String currentPassword,
+    required String code,
+    required String newPassword,
+  }) => _send(
+    'PUT',
+    '/profile/password',
+    body: {
+      'currentPassword': currentPassword,
+      'code': code,
+      'newPassword': newPassword,
+    },
+  );
 
   Future<UserSession> _saveSession(Json json) async {
     final token = json['accessToken'] as String?;
@@ -319,11 +397,16 @@ class ApiClient extends ChangeNotifier {
 
   // ---------------------------------------------------------------- Thanh toán
 
-  Future<void> pay(int bookingId, int method) => _send(
-    'POST',
-    '/payments',
-    body: {'bookingId': bookingId, 'method': method},
-  );
+  /// Cổng thanh toán mô phỏng. Trả về mã thanh toán (nếu API trả về).
+  Future<int?> pay(int bookingId, int method) async {
+    final result = await _send(
+      'POST',
+      '/payments',
+      body: {'bookingId': bookingId, 'method': method},
+    );
+    final id = result is Map ? result['id'] : null;
+    return id is num ? id.toInt() : null;
+  }
 
   Future<Paged<PaymentItem>> getMyPayments({int page = 1, int pageSize = 20}) async {
     final result = await _send(
@@ -441,12 +524,27 @@ class ApiClient extends ChangeNotifier {
   Future<Wallet> getWallet() async =>
       Wallet.fromJson(await _send('GET', '/wallet') as Json);
 
-  Future<Wallet> topUp(double amount) async => Wallet.fromJson(
-    await _send('POST', '/wallet/topup', body: {'amount': amount}) as Json,
+  /// Nạp tiền mô phỏng. [channel]: EWallet | Card | BankTransfer.
+  Future<Wallet> topUp(double amount, {String? channel}) async => Wallet.fromJson(
+    await _send(
+      'POST',
+      '/wallet/topup',
+      body: {'amount': amount, 'channel': ?channel},
+    ) as Json,
   );
 
-  Future<Wallet> withdraw(double amount) async => Wallet.fromJson(
-    await _send('POST', '/wallet/withdraw', body: {'amount': amount}) as Json,
+  /// Rút tiền – bước 1: kiểm tra số tiền và gửi mã OTP xác nhận về email.
+  Future<OtpSent> sendWithdrawOtp(double amount) async => OtpSent.fromJson(
+    await _send('POST', '/wallet/withdraw/otp', body: {'amount': amount}) as Json,
+  );
+
+  /// Rút tiền – bước 2: cùng số tiền + mã OTP trong email.
+  Future<Wallet> withdraw(double amount, String otpCode) async => Wallet.fromJson(
+    await _send(
+      'POST',
+      '/wallet/withdraw',
+      body: {'amount': amount, 'otpCode': otpCode},
+    ) as Json,
   );
 
   Future<Paged<WalletTransaction>> getWalletTransactions({
@@ -502,8 +600,13 @@ class ApiClient extends ChangeNotifier {
   Future<ReviewSummary> getUserReviews(int userId) async =>
       ReviewSummary.fromJson(await _send('GET', '/reviews/user/$userId') as Json);
 
-  Future<void> reportReview(int reviewId) =>
-      _send('POST', '/reviews/$reviewId/report');
+  /// US26 – hồ sơ của Tasker / khách trong đơn kèm các đánh giá đã nhận.
+  Future<PublicProfile> getPublicProfile(int userId) async =>
+      PublicProfile.fromJson(await _send('GET', '/public-profiles/$userId') as Json);
+
+  /// US27 – báo cáo đánh giá sai sự thật; bắt buộc nêu lý do (10–500 ký tự).
+  Future<void> reportReview(int reviewId, String reason) =>
+      _send('POST', '/reviews/$reviewId/report', body: {'reason': reason.trim()});
 
   // ---------------------------------------------------------------- Thông báo
 
@@ -804,7 +907,11 @@ class ApiClient extends ChangeNotifier {
         statusCode: 401,
       );
     }
-    throw ApiFailure(_messageOf(decoded, code), statusCode: code);
+    throw ApiFailure(
+      _messageOf(decoded, code),
+      statusCode: code,
+      body: decoded is Map<String, dynamic> ? decoded : null,
+    );
   }
 
   String _messageOf(dynamic body, int code) {
