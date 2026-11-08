@@ -82,7 +82,7 @@ class BookingCard extends StatelessWidget {
               Text(PaymentMethod.label(b.paymentMethod), style: AppText.muted),
               const Spacer(),
               Text(
-                formatMoney(forTasker ? b.taskerEarning : b.totalPrice),
+                formatMoney(forTasker ? b.taskerEarning : b.payable),
                 style: AppText.money,
               ),
             ],

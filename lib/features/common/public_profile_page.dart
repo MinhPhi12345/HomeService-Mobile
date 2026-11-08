@@ -6,6 +6,7 @@ import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
+import '../../widgets/rewards.dart';
 
 /// US26 – Hồ sơ của bên còn lại trong đơn (Tasker ↔ khách hàng) cùng các đánh giá
 /// người đó đã nhận. Người viết đánh giá chỉ hiện tên gọi (vd. "Lan").
@@ -176,6 +177,17 @@ class _Header extends StatelessWidget {
                     color: AppColors.success,
                     icon: Icons.verified_rounded,
                     dense: true,
+                  ),
+                ],
+                if (p.isTasker && p.badges.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final badge in p.badges.take(3))
+                        AwardBadgeChip(label: badge.label, rank: badge.rank),
+                    ],
                   ),
                 ],
               ],

@@ -371,7 +371,17 @@ class TaskerHomePageState extends State<TaskerHomePage> {
     }
 
     final wallet = _wallet;
+    final preferential = profile.preferentialCommissionRate;
     return [
+      // FR-31 – Tasker xuất sắc tháng: huy hiệu + chiết khấu ưu đãi đang hiệu lực
+      if (profile.badges.isNotEmpty || preferential != null) ...[
+        _AwardCard(
+          badge: profile.badges.isEmpty ? null : profile.badges.first,
+          rate: preferential,
+          until: profile.preferentialUntil,
+        ),
+        const SizedBox(height: 12),
+      ],
       _AvailabilityCard(
         available: profile.isAvailable,
         busy: _toggling,
@@ -880,6 +890,63 @@ class _WaitingRadar extends StatelessWidget {
             'Khi có khách gần bạn đặt đơn phù hợp kỹ năng, lời mời sẽ hiện ở đây. Mỗi lời mời chỉ có 45–60 giây.',
             style: AppText.muted,
             textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// FR-31 – thẻ "Tasker xuất sắc tháng": huy hiệu và chiết khấu ưu đãi đang hiệu lực.
+class _AwardCard extends StatelessWidget {
+  const _AwardCard({required this.badge, required this.rate, required this.until});
+
+  final AwardBadge? badge;
+  final double? rate;
+  final DateTime? until;
+
+  @override
+  Widget build(BuildContext context) {
+    final percent = rate == null ? null : (rate! * 100).toStringAsFixed(rate! * 100 % 1 == 0 ? 0 : 1);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [Color(0xFFFFF4CC), Color(0xFFFFFBEA)]),
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: const Color(0xFFFFE08A)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(color: const Color(0xFFFFE08A), borderRadius: BorderRadius.circular(14)),
+            child: const Icon(Icons.emoji_events_rounded, color: Color(0xFF8A6000)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  badge == null ? 'Ưu đãi Tasker xuất sắc' : '${badge!.label} · hạng ${badge!.rank}',
+                  style: AppText.body.copyWith(fontWeight: FontWeight.w800, color: const Color(0xFF6B4A00)),
+                ),
+                if (percent != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'Chiết khấu ưu đãi $percent% cho đơn nhận${until != null ? ' đến hết ${formatDate(until!.subtract(const Duration(minutes: 1)))}' : ''}',
+                    style: AppText.small.copyWith(color: const Color(0xFF6B4A00)),
+                  ),
+                ] else ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'Huy hiệu hiển thị trên hồ sơ của bạn khi khách xem.',
+                    style: AppText.small.copyWith(color: const Color(0xFF6B4A00)),
+                  ),
+                ],
+              ],
+            ),
           ),
         ],
       ),

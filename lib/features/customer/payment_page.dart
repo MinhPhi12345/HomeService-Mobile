@@ -49,7 +49,7 @@ class _PaymentPageState extends State<PaymentPage> {
       _b.status == BookingStatus.cancelled;
 
   double get _amount =>
-      _b.status == BookingStatus.cancelled ? _b.cancellationFee : _b.totalPrice;
+      _b.status == BookingStatus.cancelled ? _b.cancellationFee : _b.payable;
 
   bool get _expired =>
       !_isDebt && _b.paymentDueAt != null && _left <= Duration.zero;

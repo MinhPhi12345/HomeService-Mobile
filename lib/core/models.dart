@@ -111,6 +111,13 @@ class Booking {
     required this.customerPhone,
     required this.taskerPhone,
     required this.contactPhone,
+    this.discountAmount = 0,
+    this.voucherCode,
+    this.taskerBadges = const [],
+    this.searchExhaustedAt,
+    this.nextSearchAt,
+    this.searchStopsAt,
+    this.searchNowAvailableAt,
   });
 
   final int id;
@@ -150,6 +157,32 @@ class Booking {
 
   /// SĐT liên hệ khách nhập khi đặt đơn (khách luôn thấy; Tasker thấy khi đơn 2/3).
   final String? contactPhone;
+
+  /// FR-32 – mã giảm giá: totalPrice là giá gốc, khách trả [payable].
+  final double discountAmount;
+  final String? voucherCode;
+
+  /// FR-31 – huy hiệu Tasker xuất sắc tháng của Tasker phụ trách (chỉ có ở chi tiết đơn).
+  final List<String> taskerBadges;
+
+  /// BR-M05/M07 – đơn đã quét hết mà chưa ai nhận, hệ thống vẫn đang tìm tiếp.
+  final DateTime? searchExhaustedAt;
+  final DateTime? nextSearchAt;
+  final DateTime? searchStopsAt;
+  final DateTime? searchNowAvailableAt;
+
+  bool get stillSearching => searchExhaustedAt != null;
+
+  /// Số phút còn phải chờ để bấm "Tìm lại ngay" (0 = bấm được).
+  int searchNowWaitMinutes([DateTime? now]) {
+    final at = searchNowAvailableAt;
+    if (at == null) return 0;
+    final ms = at.difference(now ?? DateTime.now()).inMilliseconds;
+    return ms > 0 ? (ms / 60000).ceil() : 0;
+  }
+
+  double get payable => totalPrice - discountAmount;
+  bool get hasDiscount => discountAmount > 0;
 
   bool get isCash => paymentMethod == 0;
   bool get hasLocation => latitude != null && longitude != null;
@@ -193,6 +226,119 @@ class Booking {
     customerPhone: _sn(json['customerPhone']),
     taskerPhone: _sn(json['taskerPhone']),
     contactPhone: _sn(json['contactPhone']),
+    discountAmount: _d(json['discountAmount']),
+    voucherCode: _sn(json['voucherCode']),
+    taskerBadges: (json['taskerBadges'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+    searchExhaustedAt: _dtn(json['searchExhaustedAt']),
+    nextSearchAt: _dtn(json['nextSearchAt']),
+    searchStopsAt: _dtn(json['searchStopsAt']),
+    searchNowAvailableAt: _dtn(json['searchNowAvailableAt']),
+  );
+}
+
+/// FR-31 – huy hiệu Tasker xuất sắc tháng.
+class AwardBadge {
+  const AwardBadge({required this.year, required this.month, required this.rank, required this.label});
+
+  final int year;
+  final int month;
+  final int rank;
+  final String label;
+
+  factory AwardBadge.fromJson(Json json) => AwardBadge(
+    year: _i(json['year']),
+    month: _i(json['month']),
+    rank: _i(json['rank']),
+    label: _s(json['label']),
+  );
+}
+
+/// FR-32, FR-33 – ưu đãi khách dùng được (quà riêng hoặc chương trình công khai).
+class MyVoucher {
+  const MyVoucher({
+    required this.id,
+    required this.code,
+    required this.name,
+    required this.description,
+    required this.discountType,
+    required this.discountValue,
+    required this.maxDiscount,
+    required this.minOrderValue,
+    required this.serviceNames,
+    required this.endsAt,
+    required this.source,
+    required this.isGift,
+    required this.remainingUses,
+  });
+
+  final int id;
+  final String code;
+  final String name;
+  final String? description;
+  final int discountType; // 0 %, 1 số tiền
+  final double discountValue;
+  final double? maxDiscount;
+  final double minOrderValue;
+  final List<String> serviceNames;
+  final DateTime endsAt;
+  final int source; // 0 khuyến mãi, 1 chào mừng, 2 thân thiết, 3 xin lỗi
+  final bool isGift;
+  final int remainingUses;
+
+  bool get isPercent => discountType == 0;
+
+  /// Tiền giảm ước tính (giống Backend) – dùng gợi ý mã tốt nhất.
+  double estimate(double order, {double minPayable = 10000}) {
+    if (order < minOrderValue) return 0;
+    var d = isPercent ? (order * discountValue / 100).roundToDouble() : discountValue;
+    if (isPercent && maxDiscount != null && maxDiscount! > 0 && d > maxDiscount!) d = maxDiscount!;
+    final cap = order - minPayable;
+    if (d > cap) d = cap;
+    return d < 0 ? 0 : d;
+  }
+
+  factory MyVoucher.fromJson(Json json) => MyVoucher(
+    id: _i(json['id']),
+    code: _s(json['code']),
+    name: _s(json['name']),
+    description: _sn(json['description']),
+    discountType: _i(json['discountType']),
+    discountValue: _d(json['discountValue']),
+    maxDiscount: _dn(json['maxDiscount']),
+    minOrderValue: _d(json['minOrderValue']),
+    serviceNames: (json['serviceNames'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+    endsAt: _dt(json['endsAt']),
+    source: _i(json['source']),
+    isGift: _b(json['isGift']),
+    remainingUses: _i(json['remainingUses']),
+  );
+}
+
+/// FR-32 – kết quả kiểm tra mã giảm giá cho đơn sắp đặt.
+class VoucherCheck {
+  const VoucherCheck({
+    required this.code,
+    required this.name,
+    required this.originalPrice,
+    required this.discountAmount,
+    required this.payableAmount,
+    required this.message,
+  });
+
+  final String code;
+  final String name;
+  final double originalPrice;
+  final double discountAmount;
+  final double payableAmount;
+  final String message;
+
+  factory VoucherCheck.fromJson(Json json) => VoucherCheck(
+    code: _s(json['code']),
+    name: _s(json['name']),
+    originalPrice: _d(json['originalPrice']),
+    discountAmount: _d(json['discountAmount']),
+    payableAmount: _d(json['payableAmount']),
+    message: _s(json['message']),
   );
 }
 
@@ -460,6 +606,7 @@ class PublicProfile {
     this.isVerified,
     this.workingArea,
     this.skills,
+    this.badges = const [],
   });
 
   final int userId;
@@ -474,6 +621,9 @@ class PublicProfile {
   final String? workingArea;
   final String? skills;
   final List<Review> reviews;
+
+  /// FR-31 – huy hiệu Tasker xuất sắc tháng.
+  final List<AwardBadge> badges;
 
   bool get isTasker => role == 1;
 
@@ -490,6 +640,7 @@ class PublicProfile {
     workingArea: _sn(json['workingArea']),
     skills: _sn(json['skills']),
     reviews: _list(json['reviews'], Review.fromJson),
+    badges: _list(json['badges'], AwardBadge.fromJson),
   );
 }
 
@@ -749,6 +900,10 @@ class TaskerProfile {
     required this.baseLatitude,
     required this.baseLongitude,
     required this.serviceRadiusKm,
+    this.commissionRate,
+    this.preferentialCommissionRate,
+    this.preferentialUntil,
+    this.badges = const [],
   });
 
   final int id;
@@ -763,6 +918,12 @@ class TaskerProfile {
   final double baseLatitude;
   final double baseLongitude;
   final int serviceRadiusKm;
+
+  /// FR-31 – tỷ lệ chiết khấu áp cho đơn nhận lúc này; mức ưu đãi Tasker xuất sắc tháng (nếu có).
+  final double? commissionRate;
+  final double? preferentialCommissionRate;
+  final DateTime? preferentialUntil;
+  final List<AwardBadge> badges;
 
   bool get isApproved => verificationStatus == 1;
 
@@ -785,5 +946,9 @@ class TaskerProfile {
     baseLatitude: _d(json['baseLatitude']),
     baseLongitude: _d(json['baseLongitude']),
     serviceRadiusKm: _in(json['serviceRadiusKm']) ?? 5,
+    commissionRate: _dn(json['commissionRate']),
+    preferentialCommissionRate: _dn(json['preferentialCommissionRate']),
+    preferentialUntil: _dtn(json['preferentialUntil']),
+    badges: _list(json['badges'], AwardBadge.fromJson),
   );
 }
