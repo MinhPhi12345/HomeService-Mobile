@@ -14,6 +14,7 @@ import '../../widgets/common.dart';
 import '../../widgets/date_time_pick.dart';
 import '../../widgets/map_widgets.dart';
 import '../../widgets/review_sheet.dart';
+import '../../widgets/rewards.dart';
 import '../common/public_profile_page.dart';
 import 'booking_create_page.dart';
 import 'dispute_page.dart';
@@ -539,6 +540,12 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
         child: Column(
           children: [
             SummaryRow('Tổng tiền dịch vụ', formatMoney(b.totalPrice)),
+            if (b.hasDiscount)
+              SummaryRow(
+                'Mã giảm giá${b.voucherCode != null ? ' ${b.voucherCode}' : ''}',
+                '−${formatMoney(b.discountAmount)}',
+                valueColor: AppColors.success,
+              ),
             if (b.cancellationFee > 0)
               SummaryRow(
                 'Phí hủy',
@@ -551,7 +558,7 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
               formatMoney(
                 b.status == BookingStatus.cancelled
                     ? b.cancellationFee
-                    : b.totalPrice,
+                    : b.payable,
               ),
               bold: true,
             ),
@@ -598,6 +605,28 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
         secondary('Hủy đơn', _cancel, color: AppColors.danger);
       case BookingStatus.pending:
       case BookingStatus.matched:
+        if (b.stillSearching) {
+          // BR-M07: khách tự bấm tìm lại, không phải chờ lượt quét tự động
+          final wait = b.searchNowWaitMinutes();
+          final sending = b.status == BookingStatus.matched;
+          buttons.add(
+            PrimaryButton(
+              label: sending
+                  ? 'Đang tìm…'
+                  : wait > 0
+                  ? 'Tìm lại sau $wait phút'
+                  : 'Tìm lại ngay',
+              icon: Icons.person_search_rounded,
+              loading: _acting,
+              onPressed: sending || wait > 0
+                  ? null
+                  : () => _run(
+                      () => AppScope.api(context).searchNow(b.id),
+                      success: 'Đang tìm lại Tasker gần bạn.',
+                    ),
+            ),
+          );
+        }
         secondary('Hủy đơn', _cancel, color: AppColors.danger);
       case BookingStatus.accepted:
         if (b.isTaskerNoShow) {
@@ -701,7 +730,7 @@ class _PaymentStatusCardState extends State<_PaymentStatusCard> {
   }
 
   static _PayContent? content(Booking b) {
-    final total = formatMoney(b.totalPrice);
+    final total = formatMoney(b.payable); // số tiền khách thực trả (đã trừ mã giảm giá)
     final method = PaymentMethod.label(b.paymentMethod).toLowerCase();
     switch (b.status) {
       case BookingStatus.awaitingPayment:
@@ -873,7 +902,7 @@ class _ReleaseSheetState extends State<_ReleaseSheet> {
   @override
   Widget build(BuildContext context) {
     final b = widget.booking;
-    final total = formatMoney(b.totalPrice);
+    final total = formatMoney(b.payable);
     Widget step(IconData icon, String label, String value, {bool highlight = false}) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
@@ -918,11 +947,17 @@ class _ReleaseSheetState extends State<_ReleaseSheet> {
                 children: [
                   step(Icons.account_balance_wallet_outlined, 'Bạn đã thanh toán trước', total),
                   step(Icons.lock_outline_rounded, 'HomeService đang tạm giữ', total),
+                  if (b.hasDiscount)
+                    step(
+                      Icons.card_giftcard_rounded,
+                      'HomeService bù phần giảm giá${b.voucherCode != null ? ' (mã ${b.voucherCode})' : ''}',
+                      '+${formatMoney(b.discountAmount)}',
+                    ),
                   const Divider(height: 8),
                   step(
                     Icons.send_rounded,
                     'Chuyển cho Tasker khi bạn xác nhận',
-                    total,
+                    formatMoney(b.totalPrice),
                     highlight: true,
                   ),
                 ],
@@ -983,6 +1018,13 @@ class _StatusHeader extends StatelessWidget {
             ? 'Vui lòng thanh toán để hệ thống bắt đầu tìm Tasker.'
             : 'Vui lòng thanh toán trước ${formatTime(b.paymentDueAt!)} để hệ thống bắt đầu tìm Tasker.';
       case BookingStatus.pending:
+        if (b.stillSearching) {
+          final next = b.nextSearchAt == null ? '' : ' Lần tìm tiếp theo lúc ${formatTime(b.nextSearchAt!)}.';
+          final stop = b.searchStopsAt == null
+              ? ''
+              : ' Hệ thống dừng tìm lúc ${formatTime(b.searchStopsAt!)} nếu vẫn chưa có Tasker.';
+          return 'Chưa có Tasker nhận đơn, hệ thống vẫn đang tìm tiếp.$next$stop';
+        }
         return 'Hệ thống đang tìm Tasker phù hợp ở gần bạn.';
       case BookingStatus.matched:
         final wave = b.currentWave.clamp(1, 3);
@@ -1004,7 +1046,7 @@ class _StatusHeader extends StatelessWidget {
             ? 'Đơn đã hủy, phí hủy ${formatMoney(b.cancellationFee)}.'
             : 'Đơn đã hủy.';
       case BookingStatus.noTaskerFound:
-        return 'Chưa có Tasker nhận đơn sau 3 đợt mời. Bạn có thể thử lại (có thể đổi giờ) hoặc hủy để được hoàn tiền.';
+        return 'Đã gần giờ hẹn mà chưa có Tasker nhận đơn. Bạn có thể thử lại (có thể đổi giờ) hoặc hủy để được hoàn tiền.';
       case BookingStatus.expired:
         return 'Đơn đã hết hạn vì không có Tasker nhận. Tiền trả trước đã được hoàn 100%.';
       case BookingStatus.disputed:
@@ -1263,6 +1305,10 @@ class _TaskerCard extends StatelessWidget {
                         fontSize: 15,
                       ),
                     ),
+                    if (booking.taskerBadges.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      AwardBadgeChip(label: booking.taskerBadges.first),
+                    ],
                     const SizedBox(height: 4),
                     if (rating != null)
                       Row(

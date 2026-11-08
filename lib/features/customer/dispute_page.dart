@@ -91,7 +91,7 @@ class _DisputePageState extends State<DisputePage> {
                         style: AppText.body.copyWith(fontWeight: FontWeight.w700),
                       ),
                       Text(
-                        'Đơn #${b.id} · ${formatMoney(b.totalPrice)}',
+                        'Đơn #${b.id} · ${formatMoney(b.payable)}',
                         style: AppText.small,
                       ),
                     ],

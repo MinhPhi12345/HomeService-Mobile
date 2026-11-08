@@ -11,6 +11,7 @@ import '../../core/validators.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import '../../widgets/map_widgets.dart';
+import '../../widgets/rewards.dart';
 import '../../widgets/schedule_picker.dart';
 import 'booking_detail_page.dart';
 import 'payment_page.dart';
@@ -55,12 +56,21 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
   bool _locating = false;
   bool _submitting = false;
 
+  // FR-32 – mã giảm giá (chỉ đơn trả trước)
+  final _voucherCode = TextEditingController();
+  VoucherCheck? _voucher;
+  String? _voucherError;
+  bool _checkingVoucher = false;
+  List<MyVoucher> _myVouchers = const [];
+
   // Điều kiện tiền mặt (BR-P06)
   int _paidOrders = 0;
   bool _cashBlocked = false;
   double _outstanding = 0;
 
   double get _total => widget.service.basePrice * _quantity;
+  double get _discount => _method == PaymentMethod.cash ? 0 : (_voucher?.discountAmount ?? 0);
+  double get _payTotal => _total - _discount;
 
   bool get _cashAllowed =>
       _paidOrders >= _cashMinPaidOrders &&
@@ -76,6 +86,109 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
     super.initState();
     _pickEarliestSlot();
     _loadEligibility();
+    _loadVouchers();
+  }
+
+  Future<void> _loadVouchers() async {
+    try {
+      final list = await AppScope.api(context).getMyVouchers();
+      if (mounted) setState(() => _myVouchers = list);
+    } catch (_) {
+      // Không chặn đặt đơn nếu chưa tải được ưu đãi.
+    }
+  }
+
+  /// FR-32 – kiểm tra mã với dịch vụ / số lượng / phương thức hiện tại.
+  Future<void> _applyVoucher(String code, {bool silent = false}) async {
+    final c = code.trim().toUpperCase();
+    if (c.isEmpty) {
+      setState(() => _voucherError = 'Vui lòng nhập mã giảm giá.');
+      return;
+    }
+    setState(() {
+      _checkingVoucher = true;
+      _voucherError = null;
+    });
+    try {
+      final result = await AppScope.api(context).checkVoucher(
+        code: c,
+        serviceCategoryId: widget.service.id,
+        quantity: _quantity,
+        paymentMethod: _method,
+      );
+      if (!mounted) return;
+      setState(() {
+        _voucher = result;
+        _voucherCode.text = result.code;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _voucher = null;
+        _voucherError = silent ? 'Mã $c không còn áp dụng: ${errorMessage(error)}' : errorMessage(error);
+      });
+    } finally {
+      if (mounted) setState(() => _checkingVoucher = false);
+    }
+  }
+
+  void _revalidateVoucher() {
+    final applied = _voucher;
+    if (applied == null) return;
+    if (_method == PaymentMethod.cash) {
+      setState(() {
+        _voucher = null;
+        _voucherError = 'Mã giảm giá chỉ áp dụng cho đơn thanh toán trước (ví điện tử, thẻ).';
+      });
+      return;
+    }
+    _applyVoucher(applied.code, silent: true);
+  }
+
+  Future<void> _pickVoucher() async {
+    final sorted = [..._myVouchers]..sort((a, b) => b.estimate(_total).compareTo(a.estimate(_total)));
+    final code = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
+      ),
+      builder: (sheet) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(sheet).size.height * 0.75),
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+            children: [
+              const Text('Ưu đãi của tôi', style: AppText.title),
+              const SizedBox(height: 4),
+              const Text('Chọn một mã cho đơn này. Mỗi đơn dùng 1 mã.', style: AppText.muted),
+              const SizedBox(height: 12),
+              for (final v in sorted) ...[
+                VoucherTile(
+                  voucher: v,
+                  trailing: Builder(builder: (_) {
+                    final est = v.estimate(_total);
+                    return FilledButton(
+                      onPressed: est > 0 ? () => Navigator.of(sheet).pop(v.code) : null,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        minimumSize: const Size(0, 36),
+                      ),
+                      child: Text(est > 0 ? '−${formatMoney(est)}' : 'Chưa đủ'),
+                    );
+                  }),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+    if (code != null) await _applyVoucher(code);
   }
 
   @override
@@ -83,6 +196,7 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
     _address.dispose();
     _note.dispose();
     _phone.dispose();
+    _voucherCode.dispose();
     super.dispose();
   }
 
@@ -268,6 +382,7 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
         customerPresent: _present,
         note: _note.text,
         contactPhone: _phone.text.trim(),
+        voucherCode: _method == PaymentMethod.cash ? null : _voucher?.code,
       );
       await _saveContactToProfile(api);
       if (!mounted) return;
@@ -373,7 +488,10 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
                 _StepperButton(
                   icon: Icons.remove_rounded,
                   onTap: _quantity > 1
-                      ? () => setState(() => _quantity--)
+                      ? () {
+                          setState(() => _quantity--);
+                          _revalidateVoucher();
+                        }
                       : null,
                 ),
                 SizedBox(
@@ -387,7 +505,10 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
                 _StepperButton(
                   icon: Icons.add_rounded,
                   onTap: _quantity < 12
-                      ? () => setState(() => _quantity++)
+                      ? () {
+                          setState(() => _quantity++);
+                          _revalidateVoucher();
+                        }
                       : null,
                 ),
               ],
@@ -544,7 +665,10 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
             title: 'Ví điện tử',
             subtitle: 'Trả trước – tiền được giữ an toàn đến khi bạn xác nhận',
             selected: _method == PaymentMethod.eWallet,
-            onTap: () => setState(() => _method = PaymentMethod.eWallet),
+            onTap: () {
+              setState(() => _method = PaymentMethod.eWallet);
+              _revalidateVoucher();
+            },
           ),
           const SizedBox(height: 8),
           ChoiceTile(
@@ -552,7 +676,10 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
             title: 'Thẻ ngân hàng',
             subtitle: 'Trả trước bằng thẻ ATM / Visa / Mastercard',
             selected: _method == PaymentMethod.card,
-            onTap: () => setState(() => _method = PaymentMethod.card),
+            onTap: () {
+              setState(() => _method = PaymentMethod.card);
+              _revalidateVoucher();
+            },
           ),
           const SizedBox(height: 8),
           ChoiceTile(
@@ -567,7 +694,10 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
                 : 'Mở sau khi bạn hoàn tất $_cashMinPaidOrders đơn (đã có $_paidOrders)',
             enabled: _cashAllowed,
             selected: _method == PaymentMethod.cash,
-            onTap: () => setState(() => _method = PaymentMethod.cash),
+            onTap: () {
+              setState(() => _method = PaymentMethod.cash);
+              _revalidateVoucher();
+            },
           ),
           const SizedBox(height: 8),
           SwitchListTile.adaptive(
@@ -584,6 +714,89 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
             ),
           ),
           const SizedBox(height: 12),
+          const SectionHeader('Mã giảm giá'),
+          if (_method == PaymentMethod.cash)
+            const Text(
+              'Mã giảm giá chỉ áp dụng khi thanh toán trước bằng ví điện tử hoặc thẻ.',
+              style: AppText.small,
+            )
+          else if (_voucher != null)
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+              decoration: BoxDecoration(
+                color: AppColors.primarySoft,
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+                border: Border.all(color: AppColors.primary),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.confirmation_number_outlined, color: AppColors.primaryDark),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${_voucher!.code} · ${_voucher!.name}',
+                          style: AppText.body.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        Text(
+                          'Giảm ${formatMoney(_voucher!.discountAmount)} cho đơn này',
+                          style: AppText.small.copyWith(color: AppColors.primaryDark),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Bỏ mã',
+                    onPressed: () => setState(() {
+                      _voucher = null;
+                      _voucherCode.clear();
+                    }),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+            )
+          else ...[
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _voucherCode,
+                    textCapitalization: TextCapitalization.characters,
+                    maxLength: 30,
+                    onChanged: (_) {
+                      if (_voucherError != null) setState(() => _voucherError = null);
+                    },
+                    onSubmitted: _applyVoucher,
+                    decoration: appInputDecoration(
+                      label: 'Nhập mã giảm giá',
+                      icon: Icons.confirmation_number_outlined,
+                    ).copyWith(counterText: '', errorText: _voucherError),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  height: 52,
+                  child: OutlinedButton(
+                    onPressed: _checkingVoucher ? null : () => _applyVoucher(_voucherCode.text),
+                    child: Text(_checkingVoucher ? '...' : 'Áp dụng'),
+                  ),
+                ),
+              ],
+            ),
+            if (_myVouchers.isNotEmpty)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _pickVoucher,
+                  icon: const Icon(Icons.card_giftcard_rounded, size: 18),
+                  label: Text('Chọn ưu đãi của tôi (${_myVouchers.length})'),
+                ),
+              ),
+          ],
+          const SizedBox(height: 12),
           AppCard(
             child: Column(
               children: [
@@ -594,8 +807,14 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
                 SummaryRow('Số lượng', '× $_quantity'),
                 if (_scheduled != null)
                   SummaryRow('Giờ hẹn', formatSchedule(_scheduled!)),
+                if (_discount > 0)
+                  SummaryRow(
+                    'Mã ${_voucher!.code}',
+                    '−${formatMoney(_discount)}',
+                    valueColor: AppColors.success,
+                  ),
                 const Divider(height: 18),
-                SummaryRow('Tổng thanh toán', formatMoney(_total), bold: true),
+                SummaryRow('Tổng thanh toán', formatMoney(_payTotal), bold: true),
               ],
             ),
           ),
@@ -606,7 +825,7 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
           PrimaryButton(
             label: _method == PaymentMethod.cash
                 ? 'Đặt dịch vụ · ${formatMoney(_total)}'
-                : 'Tiếp tục thanh toán · ${formatMoney(_total)}',
+                : 'Tiếp tục thanh toán · ${formatMoney(_payTotal)}',
             loading: _submitting,
             onPressed: _submit,
           ),

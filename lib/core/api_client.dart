@@ -308,6 +308,7 @@ class ApiClient extends ChangeNotifier {
     required bool customerPresent,
     String? note,
     String? contactPhone,
+    String? voucherCode,
   }) async {
     final result = await _send(
       'POST',
@@ -325,9 +326,34 @@ class ApiClient extends ChangeNotifier {
         'contactPhone': (contactPhone == null || contactPhone.trim().isEmpty)
             ? null
             : contactPhone.trim(),
+        'voucherCode': (voucherCode == null || voucherCode.trim().isEmpty)
+            ? null
+            : voucherCode.trim(),
       },
     );
     return Booking.fromJson(result as Json);
+  }
+
+  /// FR-32 – kiểm tra mã giảm giá cho đơn sắp đặt (chưa giữ lượt).
+  Future<VoucherCheck> checkVoucher({
+    required String code,
+    required int serviceCategoryId,
+    required int quantity,
+    required int paymentMethod,
+  }) async {
+    final result = await _send('POST', '/vouchers/check', body: {
+      'code': code.trim(),
+      'serviceCategoryId': serviceCategoryId,
+      'quantity': quantity,
+      'paymentMethod': paymentMethod,
+    });
+    return VoucherCheck.fromJson(result as Json);
+  }
+
+  /// FR-32, FR-33 – "Ưu đãi của tôi".
+  Future<List<MyVoucher>> getMyVouchers() async {
+    final result = await _send('GET', '/vouchers/my');
+    return (result as List).map((e) => MyVoucher.fromJson(e as Json)).toList();
   }
 
   Future<Booking> getBooking(int id) async =>
@@ -358,6 +384,9 @@ class ApiClient extends ChangeNotifier {
       );
 
   Future<void> cancelBooking(int id) => _send('POST', '/bookings/$id/cancel');
+
+  /// BR-M07 – "Tìm lại ngay" khi đơn đã quét hết mà chưa có Tasker nhận.
+  Future<void> searchNow(int id) => _send('POST', '/bookings/$id/search-now');
 
   Future<void> retryBooking(int id, {DateTime? scheduledTime}) => _send(
     'POST',

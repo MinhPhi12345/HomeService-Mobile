@@ -8,6 +8,7 @@ import '../../core/labels.dart';
 import '../../core/models.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
+import '../customer/my_vouchers_page.dart';
 import '../tasker/tasker_profile_page.dart';
 import '../tasker/wallet_page.dart';
 import 'change_password_page.dart';
@@ -167,6 +168,13 @@ class _AccountPageState extends State<AccountPage> {
                     title: 'Ví Tasker',
                     subtitle: 'Nạp tiền, rút tiền, lịch sử ví',
                     onTap: () => _open(const WalletPage()),
+                  ),
+                if (user.isCustomer)
+                  _MenuItem(
+                    icon: Icons.card_giftcard_rounded,
+                    title: 'Ưu đãi của tôi',
+                    subtitle: 'Quà tặng và mã giảm giá đang dùng được',
+                    onTap: () => _open(const MyVouchersPage()),
                   ),
                 _MenuItem(
                   icon: Icons.receipt_long_outlined,

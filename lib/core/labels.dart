@@ -217,6 +217,7 @@ class WalletTxType {
     2 => 'Thu nhập đơn online',
     3 => 'Rút tiền',
     4 => 'Nhận phí hủy đơn',
+    5 => 'Thưởng Tasker xuất sắc tháng',
     _ => 'Giao dịch',
   };
 
@@ -226,9 +227,10 @@ class WalletTxType {
     2 => Icons.trending_up_rounded,
     3 => Icons.account_balance_rounded,
     4 => Icons.receipt_long_rounded,
+    5 => Icons.emoji_events_rounded,
     _ => Icons.swap_horiz_rounded,
   };
 
   /// Loại giao dịch làm tăng số dư.
-  static bool isIncome(int type) => type == 0 || type == 2 || type == 4;
+  static bool isIncome(int type) => type == 0 || type == 2 || type == 4 || type == 5;
 }
