@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../theme/app_theme.dart';
+import '../../widgets/brand_mark.dart';
 import '../../widgets/common.dart';
 import '../../widgets/motion.dart';
 import 'login_page.dart';
@@ -604,7 +605,7 @@ class _EscrowArt extends StatelessWidget {
   }
 }
 
-/// Logo chữ + biểu tượng ngôi nhà.
+/// Logo chữ + biểu tượng HomeService (ngôi nhà có dấu tích).
 class AppLogo extends StatelessWidget {
   const AppLogo({super.key, this.light = false});
 
@@ -623,11 +624,8 @@ class AppLogo extends StatelessWidget {
             color: light ? Colors.white : AppColors.primary,
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Icon(
-            Icons.home_rounded,
-            color: light ? AppColors.primary : Colors.white,
-            size: 24,
-          ),
+          alignment: Alignment.center,
+          child: BrandMark(size: 34, onLight: light),
         ),
         const SizedBox(width: 10),
         Text.rich(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../theme/app_theme.dart';
+import '../../widgets/brand_mark.dart';
 import '../../widgets/motion.dart';
 
 /// Màn hình chờ có hiệu ứng, hiện trong lúc app khởi động (đọc phiên đăng nhập, định dạng ngày…).
@@ -111,11 +112,8 @@ class _SplashPageState extends State<SplashPage>
                             ),
                           ],
                         ),
-                        child: const Icon(
-                          Icons.home_rounded,
-                          size: 54,
-                          color: AppColors.primary,
-                        ),
+                        alignment: Alignment.center,
+                        child: const BrandMark(size: 76, onLight: true),
                       ),
                     ),
                   ),

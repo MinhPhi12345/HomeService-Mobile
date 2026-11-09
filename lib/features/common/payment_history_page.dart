@@ -121,15 +121,30 @@ class _PaymentTile extends StatelessWidget {
     _ => AppColors.warning,
   };
 
+  /// Dòng phụ dưới số tiền: phí nền tảng (Tasker) / số đã hoàn một phần (Khách).
+  /// Hoàn toàn bộ thì nhãn trạng thái đã nói rõ nên không lặp lại.
+  String? get _extra {
+    if (isTasker) {
+      return item.commissionAmount > 0
+          ? 'Phí nền tảng ${formatMoney(item.commissionAmount)}'
+          : null;
+    }
+    return item.refundedAmount > 0 && item.status != 5
+        ? 'Đã hoàn ${formatMoney(item.refundedAmount)}'
+        : null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final amount = isTasker ? item.taskerAmount : item.amount;
+    final extra = _extra;
     return AppCard(
       padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               ServiceIconBadge(name: item.serviceCategoryName, size: 40),
               const SizedBox(width: 12),
@@ -139,16 +154,36 @@ class _PaymentTile extends StatelessWidget {
                   children: [
                     Text(
                       item.serviceCategoryName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: AppText.body.copyWith(fontWeight: FontWeight.w700),
                     ),
+                    const SizedBox(height: 2),
+                    Text('Đơn #${item.bookingId}', style: AppText.small),
                     Text(
-                      'Đơn #${item.bookingId} · ${formatDateTime(item.paidAt ?? item.createdAt)}',
+                      formatDateTime(item.paidAt ?? item.createdAt),
+                      maxLines: 1,
                       style: AppText.small,
                     ),
                   ],
                 ),
               ),
-              Text(formatMoney(amount), style: AppText.money),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(formatMoney(amount), style: AppText.money),
+                  if (extra != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      extra,
+                      style: AppText.small.copyWith(
+                        color: isTasker ? AppColors.inkSoft : AppColors.success,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ],
           ),
           const SizedBox(height: 10),
@@ -159,19 +194,21 @@ class _PaymentTile extends StatelessWidget {
                 color: _statusColor,
                 dense: true,
               ),
-              const SizedBox(width: 8),
-              Text(PaymentMethod.label(item.method), style: AppText.small),
-              const Spacer(),
-              if (isTasker && item.commissionAmount > 0)
-                Text(
-                  'Phí nền tảng ${formatMoney(item.commissionAmount)}',
+              const SizedBox(width: 10),
+              Icon(
+                PaymentMethod.icon(item.method),
+                size: 16,
+                color: AppColors.inkSoft,
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  PaymentMethod.label(item.method),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: AppText.small,
                 ),
-              if (!isTasker && item.refundedAmount > 0)
-                Text(
-                  'Đã hoàn ${formatMoney(item.refundedAmount)}',
-                  style: AppText.small.copyWith(color: AppColors.success),
-                ),
+              ),
             ],
           ),
         ],
