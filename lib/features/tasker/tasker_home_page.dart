@@ -688,8 +688,18 @@ class _OfferCard extends StatelessWidget {
           InfoRow(icon: Icons.place_rounded, text: offer.address),
           InfoRow(
             icon: Icons.format_list_numbered_rounded,
-            text: 'Số lượng: ${offer.quantity}',
+            text: offer.estimatedMinutes > 0
+                ? 'Số lượng: ${offer.quantityText} · khoảng ${durationText(offer.estimatedMinutes)}'
+                : 'Số lượng: ${offer.quantityText}',
           ),
+          // SRS v1.8 – hạng mục khách liệt kê để Tasker biết trước việc cần làm
+          if (offer.items.isNotEmpty)
+            InfoRow(
+              icon: Icons.checklist_rounded,
+              text: [
+                for (var i = 0; i < offer.items.length; i++) '${i + 1}. ${offer.items[i]}',
+              ].join('\n'),
+            ),
           if (offer.note != null)
             InfoRow(icon: Icons.sticky_note_2_outlined, text: offer.note!),
           InfoRow(

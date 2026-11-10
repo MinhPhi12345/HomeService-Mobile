@@ -11,6 +11,7 @@ import '../../core/location_service.dart';
 import '../../core/models.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
+import '../../widgets/booking_photos.dart';
 import '../../widgets/map_widgets.dart';
 import '../../widgets/photo_picker.dart';
 import '../../widgets/review_sheet.dart';
@@ -154,17 +155,21 @@ class _JobDetailPageState extends State<JobDetailPage> {
 
   Future<void> _start() async {
     final api = AppScope.api(context);
-    final url = await _photoStep(
+    final b = _b!;
+    final photos = await _photoStep(
       title: 'Bắt đầu làm việc',
-      message: 'Chụp ảnh hiện trạng trước khi làm để làm bằng chứng nếu có khiếu nại.',
+      message: b.items.isEmpty
+          ? 'Chụp 1–5 ảnh hiện trạng trước khi làm để làm bằng chứng nếu có khiếu nại.'
+          : 'Chụp 1–3 ảnh hiện trạng cho từng hạng mục trước khi làm.',
       confirm: 'Bắt đầu',
+      items: b.items,
     );
-    if (url == null || !mounted) return;
+    if (photos == null || !mounted) return;
     await _run(
       () => api.updateBookingStatus(
         widget.bookingId,
         status: BookingStatus.inProgress,
-        photoUrl: url,
+        photos: photos,
       ),
       success: 'Đã bắt đầu. Chúc bạn làm việc thuận lợi!',
     );
@@ -184,17 +189,20 @@ class _JobDetailPageState extends State<JobDetailPage> {
       );
       if (!ok || !mounted) return;
     }
-    final url = await _photoStep(
+    final photos = await _photoStep(
       title: 'Hoàn thành công việc',
-      message: 'Chụp ảnh kết quả sau khi làm để khách kiểm tra và xác nhận.',
+      message: b.items.isEmpty
+          ? 'Chụp 1–5 ảnh kết quả sau khi làm để khách kiểm tra và xác nhận.'
+          : 'Chụp 1–3 ảnh kết quả cho từng hạng mục, nên chụp cùng góc với ảnh lúc bắt đầu.',
       confirm: 'Hoàn thành',
+      items: b.items,
     );
-    if (url == null || !mounted) return;
+    if (photos == null || !mounted) return;
     await _run(
       () => api.updateBookingStatus(
         widget.bookingId,
         status: BookingStatus.completed,
-        photoUrl: url,
+        photos: photos,
         cashCollected: b.isCash ? true : null,
       ),
       success: b.isCash
@@ -267,20 +275,27 @@ class _JobDetailPageState extends State<JobDetailPage> {
   }
 
   /// Bottom sheet chụp 1 ảnh, trả URL đã tải lên.
-  Future<String?> _photoStep({
+  /// SRS v1.8 – chụp nhiều ảnh: theo từng hạng mục (1–3 ảnh mỗi hạng mục) hoặc 1–5 ảnh.
+  Future<List<PhotoInput>?> _photoStep({
     required String title,
     required String message,
     required String confirm,
+    required List<BookingItem> items,
   }) {
-    return showModalBottomSheet<String>(
+    return showModalBottomSheet<List<PhotoInput>>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
       ),
-      builder: (_) =>
-          _PhotoStepSheet(title: title, message: message, confirm: confirm),
+      builder: (_) => _PhotoStepSheet(
+        title: title,
+        message: message,
+        confirm: confirm,
+        items: items,
+      ),
     );
   }
 
@@ -499,8 +514,14 @@ class _JobDetailPageState extends State<JobDetailPage> {
             InfoRow(
               icon: Icons.format_list_numbered_rounded,
               label: 'Số lượng',
-              text: '${b.quantity}',
+              text: b.quantityText,
             ),
+            if (b.estimatedMinutes > 0)
+              InfoRow(
+                icon: Icons.timelapse_rounded,
+                label: 'Thời lượng dự kiến',
+                text: durationText(b.estimatedMinutes),
+              ),
             if (b.note != null)
               InfoRow(
                 icon: Icons.sticky_note_2_outlined,
@@ -517,7 +538,16 @@ class _JobDetailPageState extends State<JobDetailPage> {
           ],
         ),
       ),
-      if (b.checkInPhotoUrl != null || b.checkOutPhotoUrl != null) ...[
+      if (b.items.isNotEmpty && b.photos.isEmpty) ...[
+        const SizedBox(height: 16),
+        SectionHeader('Hạng mục cần làm (${b.items.length})'),
+        AppCard(child: BookingItemList(items: b.items)),
+      ],
+      if (b.photos.isNotEmpty) ...[
+        const SizedBox(height: 16),
+        SectionHeader(b.items.isEmpty ? 'Ảnh công việc' : 'Hạng mục & ảnh trước / sau'),
+        AppCard(child: BookingPhotoCompare(items: b.items, photos: b.photos)),
+      ] else if (b.checkInPhotoUrl != null || b.checkOutPhotoUrl != null) ...[
         const SizedBox(height: 16),
         const SectionHeader('Ảnh công việc'),
         Row(
@@ -719,45 +749,103 @@ class _PhotoStepSheet extends StatefulWidget {
     required this.title,
     required this.message,
     required this.confirm,
+    required this.items,
   });
 
   final String title;
   final String message;
   final String confirm;
+  final List<BookingItem> items;
 
   @override
   State<_PhotoStepSheet> createState() => _PhotoStepSheetState();
 }
 
 class _PhotoStepSheetState extends State<_PhotoStepSheet> {
-  String? _url;
+  static const _maxPerItem = 3;
+  static const _maxGeneral = 5;
+
+  /// Ảnh theo hạng mục (itemNo → URL); dịch vụ không có hạng mục dùng [_general].
+  final Map<int, List<String>> _byItem = {};
+  List<String> _general = const [];
+
+  bool get _ready => widget.items.isEmpty
+      ? _general.isNotEmpty
+      : widget.items.every((it) => (_byItem[it.itemNo] ?? const []).isNotEmpty);
+
+  int get _missing =>
+      widget.items.where((it) => (_byItem[it.itemNo] ?? const []).isEmpty).length;
+
+  List<PhotoInput> get _result => widget.items.isEmpty
+      ? [for (final url in _general) PhotoInput(url: url)]
+      : [
+          for (final it in widget.items)
+            for (final url in _byItem[it.itemNo] ?? const <String>[])
+              PhotoInput(url: url, itemNo: it.itemNo),
+        ];
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(widget.title, style: AppText.title),
-            const SizedBox(height: 6),
-            Text(widget.message, style: AppText.muted),
-            const SizedBox(height: 16),
-            PhotoSlot(
-              url: _url,
-              height: 200,
-              label: 'Chụp ảnh',
-              onChanged: (url) => setState(() => _url = url),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(widget.title, style: AppText.title),
+          const SizedBox(height: 6),
+          Text(widget.message, style: AppText.muted),
+          const SizedBox(height: 16),
+          Flexible(
+            child: SingleChildScrollView(
+              child: widget.items.isEmpty
+                  ? PhotoGrid(
+                      urls: _general,
+                      max: _maxGeneral,
+                      onChanged: (urls) => setState(() => _general = urls),
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final it in widget.items) ...[
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              ItemNoBadge(it.itemNo),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  it.description,
+                                  style: AppText.body.copyWith(fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          PhotoGrid(
+                            urls: _byItem[it.itemNo] ?? const [],
+                            max: _maxPerItem,
+                            onChanged: (urls) => setState(() => _byItem[it.itemNo] = urls),
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+                      ],
+                    ),
             ),
-            const SizedBox(height: 16),
-            PrimaryButton(
-              label: widget.confirm,
-              onPressed: _url == null ? null : () => Navigator.of(context).pop(_url),
+          ),
+          if (widget.items.isNotEmpty && !_ready) ...[
+            Text(
+              'Còn $_missing hạng mục chưa có ảnh.',
+              style: AppText.small.copyWith(color: AppColors.warning),
             ),
+            const SizedBox(height: 8),
           ],
-        ),
+          const SizedBox(height: 8),
+          PrimaryButton(
+            label: widget.confirm,
+            onPressed: _ready ? () => Navigator.of(context).pop(_result) : null,
+          ),
+        ],
       ),
     );
   }

@@ -13,6 +13,7 @@ import '../../widgets/common.dart';
 import '../../widgets/map_widgets.dart';
 import '../../widgets/rewards.dart';
 import '../../widgets/schedule_picker.dart';
+import '../../widgets/service_detail_sheet.dart';
 import 'booking_detail_page.dart';
 import 'payment_page.dart';
 
@@ -25,6 +26,7 @@ class BookingCreatePage extends StatefulWidget {
     this.initialLocation,
     this.initialQuantity,
     this.initialNote,
+    this.initialItems = const [],
   });
 
   final ServiceCategory service;
@@ -32,6 +34,9 @@ class BookingCreatePage extends StatefulWidget {
   final GeoPoint? initialLocation;
   final int? initialQuantity;
   final String? initialNote;
+
+  /// SRS v1.8 – đặt lại đơn: giữ nguyên danh sách hạng mục.
+  final List<String> initialItems;
 
   @override
   State<BookingCreatePage> createState() => _BookingCreatePageState();
@@ -47,7 +52,24 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
   Profile? _profile;
   bool _geocoding = false;
   bool _saveToProfile = false;
-  late int _quantity = (widget.initialQuantity ?? 1).clamp(1, 12);
+  late int _quantity = widget.initialQuantity == null
+      ? widget.service.defaultQuantity
+      : widget.service.clampQuantity(widget.initialQuantity!);
+
+  // SRS v1.8 – hạng mục (dịch vụ yêu cầu liệt kê): số ô = số lượng
+  static const _itemMin = 3;
+  static const _itemMax = 200;
+  static const _itemExamples = [
+    'VD: Thay vòi rửa chén bị rỉ nước',
+    'VD: Ổ cắm phòng ngủ không có điện',
+    'VD: Bồn cầu xả nước yếu',
+    'VD: Lắp thêm 1 bóng đèn ban công',
+    'VD: Ống nước dưới bồn rửa bị rò',
+  ];
+  late final List<TextEditingController> _items = [
+    for (final text in widget.initialItems.take(_quantity)) TextEditingController(text: text),
+  ];
+  bool _itemsTouched = false;
   late GeoPoint? _location = widget.initialLocation;
   late DateTime _day = _dateOnly(DateTime.now());
   TimeOfDay? _time;
@@ -81,9 +103,47 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
       ? null
       : DateTime(_day.year, _day.month, _day.day, _time!.hour, _time!.minute);
 
+  bool get _needItems => widget.service.requiresItemList;
+
+  /// Giữ số ô hạng mục bằng số lượng đang chọn.
+  void _syncItems() {
+    if (!_needItems) return;
+    while (_items.length < _quantity) {
+      _items.add(TextEditingController());
+    }
+    while (_items.length > _quantity) {
+      _items.removeLast().dispose();
+    }
+  }
+
+  void _setQuantity(int value) {
+    final q = widget.service.clampQuantity(value);
+    if (q == _quantity) return;
+    setState(() {
+      _quantity = q;
+      _syncItems();
+    });
+    _revalidateVoucher();
+  }
+
+  void _removeItem(int index) {
+    if (_quantity <= widget.service.minQuantity) return;
+    setState(() {
+      _items.removeAt(index).dispose();
+      _quantity--;
+    });
+    _revalidateVoucher();
+  }
+
+  bool _itemBad(String text) {
+    final t = text.trim();
+    return t.length < _itemMin || t.length > _itemMax;
+  }
+
   @override
   void initState() {
     super.initState();
+    _syncItems();
     _pickEarliestSlot();
     _loadEligibility();
     _loadVouchers();
@@ -197,6 +257,9 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
     _note.dispose();
     _phone.dispose();
     _voucherCode.dispose();
+    for (final c in _items) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -350,7 +413,13 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
     FocusScope.of(context).unfocus();
     final scheduled = _scheduled;
     String? problem;
-    if (scheduled == null || !_isValidSlot(scheduled)) {
+    final itemTexts = _items.map((c) => c.text.trim()).toList();
+    if (_needItems) setState(() => _itemsTouched = true);
+    if (_needItems && (itemTexts.length < _quantity || itemTexts.any((t) => t.isEmpty))) {
+      problem = 'Vui lòng ghi rõ $_quantity hạng mục cần làm (mỗi ô một hạng mục).';
+    } else if (_needItems && itemTexts.any(_itemBad)) {
+      problem = 'Mỗi hạng mục cần mô tả từ $_itemMin đến $_itemMax ký tự.';
+    } else if (scheduled == null || !_isValidSlot(scheduled)) {
       problem = 'Vui lòng chọn giờ hẹn sau thời điểm hiện tại ít nhất 1 giờ.';
     } else if (_phone.text.trim().isEmpty ||
         Validators.optionalPhone(_phone.text) != null) {
@@ -378,6 +447,7 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
         latitude: _location!.latitude,
         longitude: _location!.longitude,
         quantity: _quantity,
+        items: _needItems ? itemTexts : null,
         paymentMethod: _method,
         customerPresent: _present,
         note: _note.text,
@@ -419,13 +489,13 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
     } catch (_) {}
   }
 
-  String get _quantityLabel => switch (widget.service.unit) {
-    'giờ' => 'Số giờ làm việc',
-    'lần' => 'Số lần',
-    'buổi' => 'Số buổi',
-    'm²' => 'Số đơn vị (m²)',
-    _ => 'Số lượng',
-  };
+  String get _quantityHint {
+    final s = widget.service;
+    if (s.fixedQuantity) {
+      return 'Mỗi đơn ${s.minQuantity} ${s.unit}, khoảng ${durationText(s.estimateMinutes(s.minQuantity))}';
+    }
+    return s.quantityHint ?? 'Từ ${s.minQuantity} đến ${s.maxQuantity} ${s.unit} cho mỗi đơn';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -455,12 +525,41 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
                         const SizedBox(height: 6),
                         Text(service.description!, style: AppText.muted),
                       ],
+                      const SizedBox(height: 4),
+                      InkWell(
+                        onTap: () => showServiceDetail(context, service),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.info_outline_rounded, size: 16, color: AppColors.primaryDark),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Xem chi tiết dịch vụ',
+                                style: AppText.label.copyWith(color: AppColors.primaryDark),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
               ],
             ),
           ),
+          if (_profile?.lockPendingAt != null) ...[
+            const SizedBox(height: 12),
+            const NoticeBox(
+              title: 'Tài khoản đang chờ khóa',
+              message:
+                  'Bạn không thể đặt đơn mới. Các đơn đang thực hiện vẫn được hoàn tất bình thường; chi tiết đã được gửi qua email.',
+              color: AppColors.danger,
+              icon: Icons.lock_clock_outlined,
+            ),
+          ],
           if (_outstanding > 0) ...[
             const SizedBox(height: 12),
             NoticeBox(
@@ -471,55 +570,108 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
             ),
           ],
           const SizedBox(height: 20),
-          SectionHeader(_quantityLabel),
+          SectionHeader(service.fixedQuantity ? 'Thời lượng' : service.quantityTitle),
           AppCard(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
               children: [
                 Expanded(
-                  child: Text(
-                    '$_quantity ${service.unit}',
-                    style: AppText.body.copyWith(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 16,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '$_quantity ${service.unit}',
+                        style: AppText.body.copyWith(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                        ),
+                      ),
+                      if (!service.fixedQuantity && service.unit != 'giờ')
+                        Text(
+                          'Làm khoảng ${durationText(service.estimateMinutes(_quantity))}',
+                          style: AppText.small,
+                        ),
+                    ],
+                  ),
+                ),
+                if (!service.fixedQuantity) ...[
+                  _StepperButton(
+                    icon: Icons.remove_rounded,
+                    onTap: _quantity > service.minQuantity ? () => _setQuantity(_quantity - 1) : null,
+                  ),
+                  SizedBox(
+                    width: 44,
+                    child: Text(
+                      '$_quantity',
+                      textAlign: TextAlign.center,
+                      style: AppText.title,
                     ),
                   ),
-                ),
-                _StepperButton(
-                  icon: Icons.remove_rounded,
-                  onTap: _quantity > 1
-                      ? () {
-                          setState(() => _quantity--);
-                          _revalidateVoucher();
-                        }
-                      : null,
-                ),
-                SizedBox(
-                  width: 44,
-                  child: Text(
-                    '$_quantity',
-                    textAlign: TextAlign.center,
-                    style: AppText.title,
+                  _StepperButton(
+                    icon: Icons.add_rounded,
+                    onTap: _quantity < service.maxQuantity ? () => _setQuantity(_quantity + 1) : null,
                   ),
-                ),
-                _StepperButton(
-                  icon: Icons.add_rounded,
-                  onTap: _quantity < 12
-                      ? () {
-                          setState(() => _quantity++);
-                          _revalidateVoucher();
-                        }
-                      : null,
-                ),
+                ],
               ],
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.only(top: 6, left: 4),
+            child: Text(_quantityHint, style: AppText.small),
+          ),
+          if (_needItems) ...[
+            const SizedBox(height: 16),
+            const SectionHeader('Hạng mục cần làm'),
+            const Text(
+              'Ghi mỗi ô một hạng mục. Tasker sẽ chụp ảnh trước và sau theo từng hạng mục để bạn đối chiếu.',
+              style: AppText.muted,
+            ),
+            const SizedBox(height: 10),
+            for (var i = 0; i < _items.length; i++)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: TextField(
+                  controller: _items[i],
+                  maxLength: _itemMax,
+                  textInputAction: TextInputAction.next,
+                  onChanged: (_) {
+                    if (_itemsTouched) setState(() {});
+                  },
+                  decoration: appInputDecoration(
+                    label: 'Hạng mục ${i + 1}',
+                    hint: _itemExamples[i % _itemExamples.length],
+                    icon: Icons.build_circle_outlined,
+                    suffix: _quantity > service.minQuantity
+                        ? IconButton(
+                            tooltip: 'Xóa hạng mục ${i + 1}',
+                            onPressed: () => _removeItem(i),
+                            icon: const Icon(Icons.close_rounded),
+                          )
+                        : null,
+                  ).copyWith(
+                    counterText: '',
+                    errorText: _itemsTouched && _itemBad(_items[i].text)
+                        ? 'Mô tả từ $_itemMin đến $_itemMax ký tự'
+                        : null,
+                  ),
+                ),
+              ),
+            if (_quantity < service.maxQuantity)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => _setQuantity(_quantity + 1),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('Thêm hạng mục'),
+                ),
+              ),
+          ],
           const SizedBox(height: 20),
           const SectionHeader('Thời gian', padding: EdgeInsets.only(bottom: 8)),
           SchedulePicker(
             day: _day,
             time: _time,
-            durationHours: service.unit == 'giờ' ? _quantity : null,
+            durationMinutes: service.estimateMinutes(_quantity),
             onChanged: (day, time) => setState(() {
               _day = day;
               _time = time;
@@ -804,7 +956,11 @@ class _BookingCreatePageState extends State<BookingCreatePage> {
                   'Đơn giá',
                   '${formatMoney(service.basePrice)} / ${service.unit}',
                 ),
-                SummaryRow('Số lượng', '× $_quantity'),
+                SummaryRow('Số lượng', '$_quantity ${service.unit}'),
+                SummaryRow(
+                  'Thời lượng dự kiến',
+                  durationText(service.estimateMinutes(_quantity)),
+                ),
                 if (_scheduled != null)
                   SummaryRow('Giờ hẹn', formatSchedule(_scheduled!)),
                 if (_discount > 0)

@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
 import '../../core/app_scope.dart';
+import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/validators.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import '../../widgets/motion.dart';
+import 'account_appeal_page.dart';
 import 'auth_header.dart';
 import 'forgot_password_page.dart';
 import 'register_page.dart';
@@ -27,6 +29,9 @@ class _LoginPageState extends State<LoginPage> {
   bool _loading = false;
   String? _error;
 
+  /// US48 – body 403 ACCOUNT_LOCKED (lý do, chi tiết, thời điểm khóa).
+  Map<String, dynamic>? _locked;
+
   @override
   void dispose() {
     _email.dispose();
@@ -40,6 +45,7 @@ class _LoginPageState extends State<LoginPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _locked = null;
     });
     try {
       // Đăng nhập thành công: AuthGate tự chuyển sang màn hình theo vai trò.
@@ -62,12 +68,69 @@ class _LoginPageState extends State<LoginPage> {
             ),
           ),
         );
+      } else if (error is ApiFailure && error.isAccountLocked) {
+        // US48 – tài khoản bị khóa: hiện lý do và nút gửi yêu cầu mở khóa
+        setState(() => _locked = error.body);
       } else {
         setState(() => _error = errorMessage(error));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  void _openAppeal() {
+    final email = _locked?['email'] as String? ?? _email.text.trim().toLowerCase();
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => AccountAppealPage(initialEmail: email)),
+    );
+  }
+
+  Widget _lockedBox(Map<String, dynamic> body) {
+    final reason = body['lockReasonText'] as String?;
+    final detail = body['lockDetail'] as String?;
+    final lockedAtRaw = body['lockedAt'] as String?;
+    final lockedAt = lockedAtRaw == null ? null : DateTime.tryParse(lockedAtRaw)?.toLocal();
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.dangerSoft,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.lock_outline_rounded, color: AppColors.danger, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Tài khoản của bạn đã bị khóa',
+                  style: AppText.body.copyWith(fontWeight: FontWeight.w700, color: AppColors.danger),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          if (reason != null) InfoRow(icon: Icons.report_outlined, label: 'Lý do', text: reason),
+          if (detail != null) InfoRow(icon: Icons.notes_rounded, label: 'Chi tiết', text: detail),
+          if (lockedAt != null)
+            InfoRow(icon: Icons.schedule_rounded, label: 'Thời điểm', text: formatDateTime(lockedAt)),
+          const SizedBox(height: 6),
+          const Text(
+            'Nếu bạn cho rằng đây là nhầm lẫn hoặc đã khắc phục, hãy gửi yêu cầu mở khóa kèm giải trình.',
+            style: AppText.muted,
+          ),
+          const SizedBox(height: 12),
+          PrimaryButton(
+            label: 'Gửi yêu cầu mở khóa',
+            color: AppColors.danger,
+            onPressed: _openAppeal,
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _forgot() async {
@@ -149,6 +212,11 @@ class _LoginPageState extends State<LoginPage> {
                       child: const Text('Quên mật khẩu?'),
                     ),
                   ),
+                  if (_locked != null) ...[
+                    const SizedBox(height: 4),
+                    _lockedBox(_locked!),
+                    const SizedBox(height: 4),
+                  ],
                   if (_error != null) ...[
                     const SizedBox(height: 4),
                     NoticeBox(

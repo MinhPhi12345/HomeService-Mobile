@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/api_client.dart';
 import '../../core/app_scope.dart';
 import '../../core/config.dart';
+import '../../core/format.dart';
 import '../../core/geocoding_service.dart';
 import '../../core/labels.dart';
 import '../../core/location_service.dart';
@@ -12,6 +13,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import '../../widgets/map_widgets.dart';
 import '../../widgets/photo_picker.dart';
+import '../../widgets/service_detail_sheet.dart';
 
 /// US04 – Tasker gửi hồ sơ xác thực: CCCD, kỹ năng, điểm làm việc, bán kính.
 /// Khu vực hiển thị trong hồ sơ do Backend tự lấy từ địa chỉ điểm làm việc (SRS 7.9).
@@ -34,6 +36,7 @@ class _TaskerProfilePageState extends State<TaskerProfilePage> {
   int _radius = 5;
   bool _loading = true;
   bool _saving = false;
+  bool _locating = false;
   String? _error;
 
   @override
@@ -107,6 +110,32 @@ class _TaskerProfilePageState extends State<TaskerProfilePage> {
       if (picked.address != null) _baseAddress.text = picked.address!;
     });
   }
+
+  /// Lấy GPS hiện tại làm điểm làm việc và tự điền địa chỉ (vẫn sửa tay được).
+  Future<void> _useCurrentLocation() async {
+    final api = AppScope.api(context);
+    setState(() => _locating = true);
+    try {
+      final point = await LocationService.tryCurrent();
+      if (!mounted) return;
+      if (point == null) {
+        showSnack(context, 'Chưa lấy được vị trí. Hãy bật GPS hoặc chọn trên bản đồ.', error: true);
+        return;
+      }
+      final address = await GeocodingService.reverse(api, point);
+      if (!mounted) return;
+      setState(() {
+        _base = point;
+        if (address != null) _baseAddress.text = address;
+      });
+    } finally {
+      if (mounted) setState(() => _locating = false);
+    }
+  }
+
+  void _toggleSkill(ServiceCategory service) => setState(() {
+    if (!_skills.remove(service.name)) _skills.add(service.name);
+  });
 
   Future<void> _submit() async {
     FocusScope.of(context).unfocus();
@@ -218,86 +247,119 @@ class _TaskerProfilePageState extends State<TaskerProfilePage> {
         onChanged: (url) => setState(() => _idCardImage = url),
       ),
       const SizedBox(height: 20),
-      const SectionHeader('Kỹ năng'),
+      SectionHeader(
+        'Dịch vụ bạn nhận làm',
+        trailing: Text('Đã chọn ${_skills.length}', style: AppText.small),
+      ),
       const Text(
-        'Chọn dịch vụ bạn làm được. Hệ thống chỉ gửi lời mời cho đơn khớp kỹ năng.',
+        'Chọn dịch vụ bạn làm được, hệ thống chỉ gửi lời mời cho đơn khớp. '
+        'Bấm ⓘ để xem công việc cụ thể của từng dịch vụ trước khi chọn.',
         style: AppText.muted,
       ),
       const SizedBox(height: 10),
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (final service in _services)
-            FilterChip(
-              label: Text(service.name),
-              selected: _skills.contains(service.name),
-              selectedColor: AppColors.primarySoft,
-              checkmarkColor: AppColors.primaryDark,
-              side: BorderSide(
-                color: _skills.contains(service.name)
-                    ? AppColors.primary
-                    : AppColors.line,
+      for (final service in _services)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: _SkillTile(
+            service: service,
+            selected: _skills.contains(service.name),
+            onTap: () => _toggleSkill(service),
+            onInfo: () => showServiceDetail(
+              context,
+              service,
+              forTasker: true,
+              chooseLabel: _skills.contains(service.name) ? 'Bỏ chọn dịch vụ này' : 'Chọn dịch vụ này',
+              onChoose: () => _toggleSkill(service),
+            ),
+          ),
+        ),
+      // Giữ lại kỹ năng cũ không còn trong danh sách dịch vụ.
+      if (_skills.any((s) => !_services.any((service) => service.name == s)))
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final skill in _skills.where(
+              (s) => !_services.any((service) => service.name == s),
+            ))
+              InputChip(
+                label: Text(skill),
+                onDeleted: () => setState(() => _skills.remove(skill)),
               ),
-              onSelected: (on) => setState(() {
-                if (on) {
-                  _skills.add(service.name);
-                } else {
-                  _skills.remove(service.name);
-                }
-              }),
-            ),
-          // Giữ lại kỹ năng cũ không còn trong danh sách dịch vụ.
-          for (final skill in _skills.where(
-            (s) => !_services.any((service) => service.name == s),
-          ))
-            InputChip(
-              label: Text(skill),
-              onDeleted: () => setState(() => _skills.remove(skill)),
-            ),
-        ],
-      ),
+          ],
+        ),
       const SizedBox(height: 20),
       const SectionHeader('Điểm làm việc'),
-      const Text(
-        'Hệ thống gửi lời mời theo khoảng cách từ điểm này tới địa chỉ đơn. Khu vực hiển thị trong hồ sơ được lấy tự động từ địa chỉ.',
-        style: AppText.muted,
+      AppCard(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (_base != null) ...[
+              PinMap(
+                key: ValueKey('${_base!.latitude},${_base!.longitude},$_radius'),
+                pins: [MapPin(point: _base!, label: 'Điểm làm việc')],
+                height: 150,
+                zoom: _radius == 3 ? 13 : (_radius == 5 ? 12 : 11),
+                interactive: false,
+              ),
+              const SizedBox(height: 12),
+            ],
+            const Text('Địa chỉ', style: AppText.label),
+            const SizedBox(height: 6),
+            TextFormField(
+              controller: _baseAddress,
+              minLines: 1,
+              maxLines: 3,
+              validator: Validators.minLength(
+                5,
+                'Vui lòng nhập địa chỉ điểm làm việc (ít nhất 5 ký tự).',
+              ),
+              decoration: appInputDecoration(
+                hint: 'Ví dụ: 12 Nguyễn Huệ, Quận 1',
+                icon: Icons.home_work_outlined,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: SecondaryButton(
+                    label: 'Vị trí hiện tại',
+                    icon: Icons.my_location_rounded,
+                    loading: _locating,
+                    onPressed: _useCurrentLocation,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: SecondaryButton(
+                    label: _base == null ? 'Chọn trên bản đồ' : 'Đổi trên bản đồ',
+                    icon: Icons.edit_location_alt_outlined,
+                    onPressed: _pickBase,
+                  ),
+                ),
+              ],
+            ),
+            if (_existing?.workingArea != null) ...[
+              const SizedBox(height: 10),
+              _HintRow(
+                icon: Icons.place_outlined,
+                text: 'Khu vực đang hiển thị: ${_existing!.workingArea}',
+              ),
+            ],
+          ],
+        ),
       ),
       const SizedBox(height: 10),
-      TextFormField(
-        controller: _baseAddress,
-        validator: Validators.minLength(
-          5,
-          'Vui lòng nhập địa chỉ điểm làm việc (ít nhất 5 ký tự).',
-        ),
-        decoration: appInputDecoration(
-          label: 'Địa chỉ điểm làm việc',
-          hint: 'Ví dụ: 12 Nguyễn Huệ, Quận 1',
-          icon: Icons.home_work_outlined,
-        ),
+      const _HintRow(
+        icon: Icons.near_me_outlined,
+        text: 'Lời mời được gửi theo khoảng cách từ điểm này đến nhà khách.',
       ),
-      const SizedBox(height: 12),
-      if (_base != null)
-        PinMap(
-          key: ValueKey('${_base!.latitude},${_base!.longitude},$_radius'),
-          pins: [MapPin(point: _base!, label: 'Điểm làm việc')],
-          height: 160,
-          zoom: _radius == 3 ? 13 : (_radius == 5 ? 12 : 11),
-          interactive: false,
-        ),
-      const SizedBox(height: 10),
-      SecondaryButton(
-        label: _base == null ? 'Chọn điểm làm việc trên bản đồ' : 'Đổi điểm làm việc',
-        icon: Icons.edit_location_alt_outlined,
-        onPressed: _pickBase,
+      const _HintRow(
+        icon: Icons.badge_outlined,
+        text: 'Khu vực hiển thị trong hồ sơ được lấy tự động từ địa chỉ trên.',
       ),
-      if (_existing?.workingArea != null) ...[
-        const SizedBox(height: 8),
-        Text(
-          'Khu vực đang hiển thị: ${_existing!.workingArea}',
-          style: AppText.small,
-        ),
-      ],
       const SizedBox(height: 20),
       const SectionHeader('Bán kính phục vụ'),
       Row(
@@ -320,5 +382,94 @@ class _TaskerProfilePageState extends State<TaskerProfilePage> {
         style: AppText.small,
       ),
     ];
+  }
+}
+
+/// Một dịch vụ trong danh sách kỹ năng: chạm để chọn / bỏ chọn, ⓘ để xem chi tiết.
+class _SkillTile extends StatelessWidget {
+  const _SkillTile({
+    required this.service,
+    required this.selected,
+    required this.onTap,
+    required this.onInfo,
+  });
+
+  final ServiceCategory service;
+  final bool selected;
+  final VoidCallback onTap;
+  final VoidCallback onInfo;
+
+  String get _durationNote {
+    final s = service;
+    if (s.unit == 'giờ') return 'theo số giờ khách đặt';
+    if (s.fixedQuantity) return 'khoảng ${durationText(s.estimateMinutes(s.minQuantity))}';
+    return 'khoảng ${durationText(s.minutesPerUnit)} / ${s.unit}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      onTap: onTap,
+      padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+      color: selected ? AppColors.primarySoft : AppColors.surface,
+      borderColor: selected ? AppColors.primary : AppColors.line,
+      radius: AppRadius.md,
+      child: Row(
+        children: [
+          Icon(
+            selected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+            color: selected ? AppColors.primary : AppColors.muted,
+          ),
+          const SizedBox(width: 10),
+          ServiceIconBadge(name: service.name, size: 40, imageUrl: service.iconUrl),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  service.name,
+                  style: AppText.body.copyWith(fontWeight: FontWeight.w700),
+                ),
+                Text(
+                  '${formatMoney(service.basePrice)} / ${service.unit} · $_durationNote',
+                  style: AppText.small,
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Chi tiết dịch vụ ${service.name}',
+            onPressed: onInfo,
+            icon: const Icon(Icons.info_outline_rounded, color: AppColors.inkSoft),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HintRow extends StatelessWidget {
+  const _HintRow({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(icon, size: 16, color: AppColors.inkSoft),
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: AppText.muted)),
+        ],
+      ),
+    );
   }
 }

@@ -8,6 +8,7 @@ import '../../core/models.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import '../../widgets/motion.dart';
+import '../../widgets/service_detail_sheet.dart';
 import 'booking_create_page.dart';
 import 'booking_detail_page.dart';
 
@@ -281,7 +282,24 @@ class _ServiceTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ServiceIconBadge(name: service.name, size: 46, imageUrl: service.iconUrl),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ServiceIconBadge(name: service.name, size: 46, imageUrl: service.iconUrl),
+              const Spacer(),
+              // SRS v1.8 – ⓘ chi tiết dịch vụ (bao gồm / không bao gồm / chuẩn bị / lưu ý)
+              SizedBox(
+                width: 32,
+                height: 32,
+                child: IconButton(
+                  tooltip: 'Chi tiết dịch vụ',
+                  padding: EdgeInsets.zero,
+                  onPressed: () => showServiceDetail(context, service, onChoose: onTap),
+                  icon: const Icon(Icons.info_outline_rounded, size: 20, color: AppColors.inkSoft),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 12),
           Text(
             service.name,

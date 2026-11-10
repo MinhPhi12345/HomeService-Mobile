@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import '../core/models.dart';
 import 'common.dart';
 
 /// Chọn ngày + giờ bắt đầu khi tạo đơn.
@@ -16,6 +17,7 @@ class SchedulePicker extends StatefulWidget {
     required this.time,
     required this.onChanged,
     this.durationHours,
+    this.durationMinutes,
   });
 
   final DateTime day;
@@ -23,6 +25,9 @@ class SchedulePicker extends StatefulWidget {
 
   /// Thời lượng (giờ) để hiện giờ kết thúc dự kiến; null nếu dịch vụ không tính theo giờ.
   final int? durationHours;
+
+  /// SRS v1.8 – thời lượng ước tính (phút) của đơn; ưu tiên hơn [durationHours].
+  final int? durationMinutes;
   final void Function(DateTime day, TimeOfDay? time) onChanged;
 
   static DateTime dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
@@ -351,12 +356,13 @@ class _SchedulePickerState extends State<SchedulePicker> {
 
   String _rangeText(TimeOfDay start) {
     final hours = widget.durationHours;
-    if (hours == null) return 'Bắt đầu lúc ${_hm(start)}';
-    final end = _at(widget.day, start).add(Duration(hours: hours));
+    final minutes = widget.durationMinutes ?? (hours == null ? null : hours * 60);
+    if (minutes == null || minutes <= 0) return 'Bắt đầu lúc ${_hm(start)}';
+    final end = _at(widget.day, start).add(Duration(minutes: minutes));
     final endText =
         '${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}';
     final nextDay = SchedulePicker.dateOnly(end) != widget.day ? ' hôm sau' : '';
-    return '${_hm(start)} – $endText$nextDay · khoảng $hours giờ';
+    return '${_hm(start)} – $endText$nextDay · khoảng ${durationText(minutes)}';
   }
 }
 

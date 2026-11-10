@@ -177,6 +177,7 @@ class DisputeReason {
     2 => 'Làm hư hỏng tài sản',
     3 => 'Thái độ không phù hợp',
     4 => 'Lý do khác',
+    5 => 'Tasker bị khóa tài khoản khi đang làm',
     _ => 'Khác',
   };
 }

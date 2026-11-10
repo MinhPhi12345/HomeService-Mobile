@@ -10,6 +10,7 @@ import '../../core/labels.dart';
 import '../../core/location_service.dart';
 import '../../core/models.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/booking_photos.dart';
 import '../../widgets/common.dart';
 import '../../widgets/date_time_pick.dart';
 import '../../widgets/map_widgets.dart';
@@ -366,6 +367,7 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
                 : null,
             initialQuantity: b.quantity,
             initialNote: b.note,
+            initialItems: [for (final it in b.items) it.description],
           ),
         ),
       );
@@ -472,8 +474,14 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
             InfoRow(
               icon: Icons.format_list_numbered_rounded,
               label: 'Số lượng',
-              text: '${b.quantity}',
+              text: b.quantityText,
             ),
+            if (b.estimatedMinutes > 0)
+              InfoRow(
+                icon: Icons.timelapse_rounded,
+                label: 'Thời lượng dự kiến',
+                text: durationText(b.estimatedMinutes),
+              ),
             if (b.note != null)
               InfoRow(
                 icon: Icons.sticky_note_2_outlined,
@@ -494,7 +502,16 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
           ],
         ),
       ),
-      if (b.checkInPhotoUrl != null || b.checkOutPhotoUrl != null) ...[
+      if (b.items.isNotEmpty && b.photos.isEmpty) ...[
+        const SizedBox(height: 16),
+        SectionHeader('Hạng mục cần làm (${b.items.length})'),
+        AppCard(child: BookingItemList(items: b.items)),
+      ],
+      if (b.photos.isNotEmpty) ...[
+        const SizedBox(height: 16),
+        SectionHeader(b.items.isEmpty ? 'Ảnh trước và sau khi làm' : 'Hạng mục & ảnh trước / sau'),
+        AppCard(child: BookingPhotoCompare(items: b.items, photos: b.photos)),
+      ] else if (b.checkInPhotoUrl != null || b.checkOutPhotoUrl != null) ...[
         const SizedBox(height: 16),
         const SectionHeader('Ảnh công việc'),
         Row(
