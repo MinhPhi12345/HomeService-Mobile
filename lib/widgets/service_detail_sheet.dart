@@ -12,6 +12,7 @@ Future<void> showServiceDetail(
   ServiceCategory service, {
   VoidCallback? onChoose,
   String chooseLabel = 'Đặt dịch vụ này',
+  bool forTasker = false,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -31,6 +32,7 @@ Future<void> showServiceDetail(
         controller: controller,
         onChoose: onChoose,
         chooseLabel: chooseLabel,
+        forTasker: forTasker,
       ),
     ),
   );
@@ -42,12 +44,16 @@ class _ServiceDetailBody extends StatelessWidget {
     required this.controller,
     required this.onChoose,
     required this.chooseLabel,
+    required this.forTasker,
   });
 
   final ServiceCategory service;
   final ScrollController controller;
   final VoidCallback? onChoose;
   final String chooseLabel;
+
+  /// Tasker xem trước khi chọn kỹ năng: đổi tiêu đề các mục theo góc nhìn người làm.
+  final bool forTasker;
 
   String get _quantityText => service.fixedQuantity
       ? '${service.minQuantity} ${service.unit} mỗi đơn'
@@ -65,9 +71,24 @@ class _ServiceDetailBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = service;
     final sections = <(String, String?, IconData, Color)>[
-      ('Công việc bao gồm', s.includes, Icons.check_rounded, AppColors.success),
-      ('Không bao gồm', s.excludes, Icons.close_rounded, AppColors.danger),
-      ('Bạn cần chuẩn bị', s.customerPrepares, Icons.inventory_2_outlined, AppColors.accent),
+      (
+        forTasker ? 'Công việc bạn sẽ làm' : 'Công việc bao gồm',
+        s.includes,
+        Icons.check_rounded,
+        AppColors.success,
+      ),
+      (
+        forTasker ? 'Ngoài phạm vi (được từ chối nếu khách yêu cầu)' : 'Không bao gồm',
+        s.excludes,
+        Icons.close_rounded,
+        AppColors.danger,
+      ),
+      (
+        forTasker ? 'Khách tự chuẩn bị' : 'Bạn cần chuẩn bị',
+        s.customerPrepares,
+        Icons.inventory_2_outlined,
+        AppColors.accent,
+      ),
       ('Lưu ý', s.notes, Icons.info_outline_rounded, AppColors.info),
     ];
     return Column(
@@ -108,7 +129,7 @@ class _ServiceDetailBody extends StatelessWidget {
               const SizedBox(height: 16),
               _Fact(
                 icon: Icons.sell_outlined,
-                label: 'Đơn giá',
+                label: forTasker ? 'Giá khách trả' : 'Đơn giá',
                 value: '${formatMoney(s.basePrice)} / ${s.unit}',
               ),
               _Fact(icon: Icons.format_list_numbered_rounded, label: 'Số lượng', value: _quantityText),
@@ -117,7 +138,17 @@ class _ServiceDetailBody extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(s.quantityHint!, style: AppText.small),
               ],
-              if (s.requiresItemList) ...[
+              if (forTasker) ...[
+                const SizedBox(height: 12),
+                NoticeBox(
+                  icon: Icons.photo_camera_outlined,
+                  message: s.requiresItemList
+                      ? 'Khách ghi sẵn từng hạng mục khi đặt. Lúc bắt đầu và lúc hoàn thành, bạn chụp 1–3 ảnh cho mỗi hạng mục. '
+                            'Thu nhập = giá khách trả trừ chiết khấu nền tảng; số tiền bạn nhận hiện sẵn trên từng lời mời.'
+                      : 'Lúc bắt đầu và lúc hoàn thành, bạn chụp 1–5 ảnh hiện trạng. '
+                            'Thu nhập = giá khách trả trừ chiết khấu nền tảng; số tiền bạn nhận hiện sẵn trên từng lời mời.',
+                ),
+              ] else if (s.requiresItemList) ...[
                 const SizedBox(height: 12),
                 const NoticeBox(
                   icon: Icons.checklist_rounded,

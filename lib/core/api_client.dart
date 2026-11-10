@@ -713,10 +713,7 @@ class ApiClient extends ChangeNotifier {
           .timeout(const Duration(seconds: 60));
       return http.Response.fromStream(streamed);
     });
-    final decoded = await _decode(response, auth: true);
-    final url = (decoded as Json?)?['url'] as String?;
-    if (url == null) throw const ApiFailure('Tải ảnh thất bại.');
-    return url;
+    return _uploadDecode(response, auth: true);
   }
 
   // ---------------------------------------------------------------- US48 – yêu cầu mở khóa tài khoản
@@ -756,10 +753,7 @@ class ApiClient extends ChangeNotifier {
           .timeout(const Duration(seconds: 60));
       return http.Response.fromStream(streamed);
     });
-    final decoded = await _decode(response, auth: false);
-    final url = (decoded as Json?)?['url'] as String?;
-    if (url == null) throw const ApiFailure('Tải ảnh thất bại.');
-    return url;
+    return _uploadDecode(response, auth: false);
   }
 
   /// Bước 3: gửi giải trình (20–2000 ký tự) kèm tối đa 3 ảnh.
@@ -1016,11 +1010,35 @@ class ApiClient extends ChangeNotifier {
         statusCode: 401,
       );
     }
+    // 403 kèm trang HTML (không phải JSON của Backend) = tường lửa của hosting chặn yêu cầu,
+    // không phải do tài khoản thiếu quyền.
+    if (code == 403 && decoded == null && response.bodyBytes.isNotEmpty) {
+      if (kDebugMode) debugPrint('403 không phải từ API: ${response.request?.url}');
+      throw const ApiFailure(
+        'Máy chủ hosting đã chặn yêu cầu này (lỗi 403 từ tường lửa). Vui lòng thử lại; nếu vẫn lỗi, báo quản trị viên.',
+        statusCode: 403,
+      );
+    }
     throw ApiFailure(
       _messageOf(decoded, code),
       statusCode: code,
       body: decoded is Map<String, dynamic> ? decoded : null,
     );
+  }
+
+  /// Tải ảnh lên: API /uploads không giới hạn vai trò nên 403 ở đây luôn là do hosting chặn ảnh.
+  Future<String> _uploadDecode(http.Response response, {required bool auth}) async {
+    if (response.statusCode == 403) {
+      if (kDebugMode) debugPrint('Upload bị chặn 403: ${response.request?.url}');
+      throw const ApiFailure(
+        'Máy chủ hosting đã chặn ảnh này (lỗi 403 từ tường lửa). Hãy chụp lại ảnh khác rồi thử lại; nếu vẫn lỗi, báo quản trị viên.',
+        statusCode: 403,
+      );
+    }
+    final decoded = await _decode(response, auth: auth);
+    final url = (decoded as Json?)?['url'] as String?;
+    if (url == null) throw const ApiFailure('Tải ảnh thất bại.');
+    return url;
   }
 
   String _messageOf(dynamic body, int code) {
