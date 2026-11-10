@@ -27,6 +27,9 @@ class ApiFailure implements Exception {
   /// Đăng nhập đúng mật khẩu nhưng chưa xác thực email bằng OTP.
   bool get isEmailNotVerified => statusCode == 403 && body?['code'] == 'EMAIL_NOT_VERIFIED';
 
+  /// US48 (SRS v1.8) – đăng nhập đúng mật khẩu nhưng tài khoản đã bị khóa (kèm lý do).
+  bool get isAccountLocked => statusCode == 403 && body?['code'] == 'ACCOUNT_LOCKED';
+
   /// Số giây phải chờ khi gửi lại mã quá nhanh (429 "Vui lòng đợi 42 giây…").
   int? get waitSeconds {
     final m = RegExp(r'đợi (\d+) giây').firstMatch(message);
@@ -309,6 +312,7 @@ class ApiClient extends ChangeNotifier {
     String? note,
     String? contactPhone,
     String? voucherCode,
+    List<String>? items,
   }) async {
     final result = await _send(
       'POST',
@@ -329,6 +333,8 @@ class ApiClient extends ChangeNotifier {
         'voucherCode': (voucherCode == null || voucherCode.trim().isEmpty)
             ? null
             : voucherCode.trim(),
+        // SRS v1.8 – danh sách hạng mục (dịch vụ yêu cầu liệt kê)
+        if (items != null) 'items': items.map((e) => e.trim()).toList(),
       },
     );
     return Booking.fromJson(result as Json);
@@ -516,17 +522,21 @@ class ApiClient extends ChangeNotifier {
       _send('POST', '/bookings/$bookingId/reject');
 
   /// 3 = bắt đầu (kèm ảnh trước), 4 = hoàn thành (kèm ảnh sau; đơn tiền mặt cần [cashCollected]).
+  /// SRS v1.8: gửi nhiều ảnh qua [photos] – dịch vụ theo hạng mục: mỗi hạng mục 1–3 ảnh (kèm itemNo);
+  /// dịch vụ khác: 1–5 ảnh.
   Future<void> updateBookingStatus(
     int bookingId, {
     required int status,
-    required String photoUrl,
+    String? photoUrl,
+    List<PhotoInput>? photos,
     bool? cashCollected,
   }) => _send(
     'PUT',
     '/bookings/$bookingId/status',
     body: {
       'status': status,
-      'photoUrl': photoUrl,
+      'photoUrl': ?photoUrl,
+      if (photos != null) 'photos': [for (final p in photos) p.toJson()],
       'cashCollected': ?cashCollected,
     },
   );
@@ -709,6 +719,77 @@ class ApiClient extends ChangeNotifier {
     return url;
   }
 
+  // ---------------------------------------------------------------- US48 – yêu cầu mở khóa tài khoản
+
+  static const _appealHeader = 'X-Appeal-Token';
+
+  /// Bước 1: gửi mã OTP về email của tài khoản bị khóa (luôn trả kết quả giống nhau).
+  Future<OtpSent> sendAppealOtp(String email) async => OtpSent.fromJson(
+    await _send(
+      'POST',
+      '/account-appeals/send-otp',
+      body: {'email': email.trim().toLowerCase()},
+      auth: false,
+    ) as Json,
+    email: email.trim().toLowerCase(),
+  );
+
+  /// Bước 2: đúng mã OTP → token phiên (30 phút) + lý do khóa + có được gửi yêu cầu không.
+  Future<AppealSession> verifyAppeal(String email, String code) async => AppealSession.fromJson(
+    await _send(
+      'POST',
+      '/account-appeals/verify',
+      body: {'email': email.trim().toLowerCase(), 'code': code},
+      auth: false,
+    ) as Json,
+  );
+
+  /// Ảnh minh chứng (JPG/PNG ≤ 5 MB) trong phiên đã xác thực.
+  Future<String> uploadAppealImage(String token, String filePath) async {
+    final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/account-appeals/upload'))
+      ..headers['Accept'] = 'application/json'
+      ..headers[_appealHeader] = token;
+    request.files.add(await http.MultipartFile.fromPath('file', filePath));
+    final response = await _guard(() async {
+      final streamed = await _http
+          .send(request)
+          .timeout(const Duration(seconds: 60));
+      return http.Response.fromStream(streamed);
+    });
+    final decoded = await _decode(response, auth: false);
+    final url = (decoded as Json?)?['url'] as String?;
+    if (url == null) throw const ApiFailure('Tải ảnh thất bại.');
+    return url;
+  }
+
+  /// Bước 3: gửi giải trình (20–2000 ký tự) kèm tối đa 3 ảnh.
+  Future<AppealContext> submitAppeal({
+    required String token,
+    required String content,
+    required List<String> attachmentUrls,
+  }) async => AppealContext.fromJson(
+    await _send(
+      'POST',
+      '/account-appeals',
+      body: {
+        'token': token,
+        'content': content.trim(),
+        'attachmentUrls': attachmentUrls,
+      },
+      auth: false,
+    ) as Json,
+  );
+
+  /// Tải lại thông tin trong phiên (dùng khi quay lại màn hình).
+  Future<AppealContext> appealSession(String token) async => AppealContext.fromJson(
+    await _send(
+      'GET',
+      '/account-appeals/session',
+      auth: false,
+      extraHeaders: {_appealHeader: token},
+    ) as Json,
+  );
+
   // ---------------------------------------------------------------- Bản đồ & địa chỉ
 
   static const osmTileUrl = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
@@ -863,11 +944,12 @@ class ApiClient extends ChangeNotifier {
     Json? body,
     Map<String, String>? query,
     bool auth = true,
+    Map<String, String>? extraHeaders,
   }) async {
     final uri = Uri.parse('$_baseUrl$path').replace(
       queryParameters: (query == null || query.isEmpty) ? null : query,
     );
-    final headers = <String, String>{'Accept': 'application/json'};
+    final headers = <String, String>{'Accept': 'application/json', ...?extraHeaders};
     if (body != null) headers['Content-Type'] = 'application/json';
     if (auth) {
       if (_token == null) {

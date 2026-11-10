@@ -55,6 +55,16 @@ class ServiceCategory {
     required this.basePrice,
     required this.unit,
     this.iconUrl,
+    this.minQuantity = 1,
+    this.maxQuantity = 12,
+    this.quantityLabel,
+    this.quantityHint,
+    this.minutesPerUnit = 60,
+    this.requiresItemList = false,
+    this.includes,
+    this.excludes,
+    this.customerPrepares,
+    this.notes,
   });
 
   final int id;
@@ -64,13 +74,101 @@ class ServiceCategory {
   final String unit;
   final String? iconUrl;
 
-  factory ServiceCategory.fromJson(Json json) => ServiceCategory(
-    id: _i(json['id']),
-    name: _s(json['name']),
-    description: _sn(json['description']),
-    basePrice: _d(json['basePrice']),
-    unit: _s(json['unit']),
-    iconUrl: _sn(json['iconUrl']),
+  /// SRS v1.8 – số lượng mỗi đơn (min == max: cố định, ẩn ô số lượng).
+  final int minQuantity;
+  final int maxQuantity;
+  final String? quantityLabel;
+  final String? quantityHint;
+
+  /// Thời lượng ước tính cho mỗi đơn vị (phút) – dùng xếp lịch Tasker.
+  final int minutesPerUnit;
+
+  /// Khách phải liệt kê từng hạng mục (số dòng = số lượng); Tasker chụp ảnh theo hạng mục.
+  final bool requiresItemList;
+
+  /// Chi tiết dịch vụ – mỗi dòng một ý (Admin nhập).
+  final String? includes;
+  final String? excludes;
+  final String? customerPrepares;
+  final String? notes;
+
+  bool get fixedQuantity => minQuantity >= maxQuantity;
+  String get quantityTitle =>
+      (quantityLabel?.trim().isNotEmpty ?? false) ? quantityLabel!.trim() : 'Số $unit';
+  int clampQuantity(int q) => q < minQuantity ? minQuantity : (q > maxQuantity ? maxQuantity : q);
+  int get defaultQuantity => unit == 'giờ' ? clampQuantity(2) : minQuantity;
+  int estimateMinutes(int q) => minutesPerUnit * q;
+
+  factory ServiceCategory.fromJson(Json json) {
+    final min = _in(json['minQuantity']) ?? 1;
+    final max = _in(json['maxQuantity']) ?? 12;
+    return ServiceCategory(
+      id: _i(json['id']),
+      name: _s(json['name']),
+      description: _sn(json['description']),
+      basePrice: _d(json['basePrice']),
+      unit: _s(json['unit']),
+      iconUrl: _sn(json['iconUrl']),
+      minQuantity: min < 1 ? 1 : min,
+      maxQuantity: max < min ? min : max,
+      quantityLabel: _sn(json['quantityLabel']),
+      quantityHint: _sn(json['quantityHint']),
+      minutesPerUnit: _in(json['minutesPerUnit']) ?? 60,
+      requiresItemList: _b(json['requiresItemList']),
+      includes: _sn(json['includes']),
+      excludes: _sn(json['excludes']),
+      customerPrepares: _sn(json['customerPrepares']),
+      notes: _sn(json['notes']),
+    );
+  }
+}
+
+/// SRS v1.8 – tách nội dung nhiều dòng (mỗi dòng một ý) thành danh sách.
+List<String> splitLines(String? text) => (text ?? '')
+    .split(RegExp(r'\r?\n'))
+    .map((e) => e.replaceFirst(RegExp(r'^\s*[-•*]\s*'), '').trim())
+    .where((e) => e.isNotEmpty)
+    .toList();
+
+/// 150 → "2 giờ 30 phút"; 45 → "45 phút".
+String durationText(int minutes) {
+  if (minutes <= 0) return '';
+  final h = minutes ~/ 60;
+  final m = minutes % 60;
+  if (h == 0) return '$m phút';
+  return m == 0 ? '$h giờ' : '$h giờ $m phút';
+}
+
+/// SRS v1.8 – hạng mục khách ghi khi đặt (Sửa điện nước).
+class BookingItem {
+  const BookingItem({required this.itemNo, required this.description});
+
+  final int itemNo;
+  final String description;
+
+  factory BookingItem.fromJson(Json json) =>
+      BookingItem(itemNo: _i(json['itemNo']), description: _s(json['description']));
+}
+
+/// SRS v1.8 – ảnh Tasker chụp: stage 0 = lúc bắt đầu, 1 = lúc hoàn thành; itemNo theo hạng mục.
+class BookingPhoto {
+  const BookingPhoto({
+    required this.stage,
+    required this.itemNo,
+    required this.url,
+    this.note,
+  });
+
+  final int stage;
+  final int? itemNo;
+  final String url;
+  final String? note;
+
+  factory BookingPhoto.fromJson(Json json) => BookingPhoto(
+    stage: _i(json['stage']),
+    itemNo: _in(json['itemNo']),
+    url: _s(json['url']),
+    note: _sn(json['note']),
   );
 }
 
@@ -118,6 +216,11 @@ class Booking {
     this.nextSearchAt,
     this.searchStopsAt,
     this.searchNowAvailableAt,
+    this.estimatedMinutes = 0,
+    this.serviceUnit,
+    this.requiresItemList = false,
+    this.items = const [],
+    this.photos = const [],
   });
 
   final int id;
@@ -170,6 +273,15 @@ class Booking {
   final DateTime? nextSearchAt;
   final DateTime? searchStopsAt;
   final DateTime? searchNowAvailableAt;
+
+  /// SRS v1.8 – thời lượng ước tính, đơn vị dịch vụ, hạng mục và ảnh trước/sau.
+  final int estimatedMinutes;
+  final String? serviceUnit;
+  final bool requiresItemList;
+  final List<BookingItem> items;
+  final List<BookingPhoto> photos;
+
+  String get quantityText => serviceUnit == null ? '$quantity' : '$quantity $serviceUnit';
 
   bool get stillSearching => searchExhaustedAt != null;
 
@@ -233,6 +345,11 @@ class Booking {
     nextSearchAt: _dtn(json['nextSearchAt']),
     searchStopsAt: _dtn(json['searchStopsAt']),
     searchNowAvailableAt: _dtn(json['searchNowAvailableAt']),
+    estimatedMinutes: _i(json['estimatedMinutes']),
+    serviceUnit: _sn(json['serviceUnit']),
+    requiresItemList: _b(json['requiresItemList']),
+    items: _list(json['items'], BookingItem.fromJson),
+    photos: _list(json['photos'], BookingPhoto.fromJson),
   );
 }
 
@@ -361,6 +478,9 @@ class TaskerOffer {
     this.customerRatingAverage,
     this.customerId = 0,
     this.customerReviewCount = 0,
+    this.estimatedMinutes = 0,
+    this.serviceUnit,
+    this.items = const [],
   });
 
   final int offerId;
@@ -383,6 +503,13 @@ class TaskerOffer {
   final int customerId;
   final int customerReviewCount;
 
+  /// SRS v1.8 – thời lượng ước tính, đơn vị dịch vụ và hạng mục khách liệt kê.
+  final int estimatedMinutes;
+  final String? serviceUnit;
+  final List<String> items;
+
+  String get quantityText => serviceUnit == null ? '$quantity' : '$quantity $serviceUnit';
+
   double get earning => totalPrice - estimatedCommission;
 
   factory TaskerOffer.fromJson(Json json) => TaskerOffer(
@@ -403,6 +530,9 @@ class TaskerOffer {
     customerRatingAverage: _dn(json['customerRatingAverage']),
     customerId: _i(json['customerId']),
     customerReviewCount: _i(json['customerReviewCount']),
+    estimatedMinutes: _i(json['estimatedMinutes']),
+    serviceUnit: _sn(json['serviceUnit']),
+    items: _strings(json['items']),
   );
 }
 
@@ -859,6 +989,7 @@ class Profile {
     required this.outstandingAmount,
     required this.isCashBlocked,
     required this.createdAt,
+    this.lockPendingAt,
   });
 
   final int id;
@@ -872,6 +1003,9 @@ class Profile {
   final bool isCashBlocked;
   final DateTime createdAt;
 
+  /// US30 (SRS v1.8) – Admin đã đặt khóa sau khi hoàn tất đơn: không đặt / nhận đơn mới.
+  final DateTime? lockPendingAt;
+
   factory Profile.fromJson(Json json) => Profile(
     id: _i(json['id']),
     fullName: _s(json['fullName']),
@@ -883,6 +1017,7 @@ class Profile {
     outstandingAmount: _d(json['outstandingAmount']),
     isCashBlocked: _b(json['isCashBlocked']),
     createdAt: _dt(json['createdAt']),
+    lockPendingAt: _dtn(json['lockPendingAt']),
   );
 }
 
@@ -950,5 +1085,103 @@ class TaskerProfile {
     preferentialCommissionRate: _dn(json['preferentialCommissionRate']),
     preferentialUntil: _dtn(json['preferentialUntil']),
     badges: _list(json['badges'], AwardBadge.fromJson),
+  );
+}
+
+/// SRS v1.8 – một ảnh gửi kèm khi Bắt đầu / Hoàn thành ([itemNo] = số thứ tự hạng mục, nếu có).
+class PhotoInput {
+  const PhotoInput({required this.url, this.itemNo, this.note});
+
+  final String url;
+  final int? itemNo;
+  final String? note;
+
+  Json toJson() => {
+    'url': url,
+    'itemNo': ?itemNo,
+    'note': ?note,
+  };
+}
+
+/// US48 (SRS v1.8) – yêu cầu mở khóa đã gửi (0 chờ xử lý · 1 chấp nhận · 2 từ chối).
+class AppealHistoryItem {
+  const AppealHistoryItem({
+    required this.id,
+    required this.status,
+    required this.createdAt,
+    this.resolvedAt,
+    this.adminNote,
+  });
+
+  final int id;
+  final int status;
+  final DateTime createdAt;
+  final DateTime? resolvedAt;
+  final String? adminNote;
+
+  String get statusText => switch (status) {
+    0 => 'Đang chờ xử lý',
+    1 => 'Đã chấp nhận',
+    _ => 'Đã từ chối',
+  };
+
+  factory AppealHistoryItem.fromJson(Json json) => AppealHistoryItem(
+    id: _i(json['id']),
+    status: _i(json['status']),
+    createdAt: _dt(json['createdAt']),
+    resolvedAt: _dtn(json['resolvedAt']),
+    adminNote: _sn(json['adminNote']),
+  );
+}
+
+/// Thông tin khóa + điều kiện gửi yêu cầu mở khóa (sau khi xác thực email bằng OTP).
+class AppealContext {
+  const AppealContext({
+    required this.fullName,
+    required this.maskedEmail,
+    required this.lockReasonText,
+    required this.canSubmit,
+    required this.remainingAppeals,
+    required this.history,
+    this.lockDetail,
+    this.lockedAt,
+    this.blockedMessage,
+    this.nextAppealAt,
+  });
+
+  final String fullName;
+  final String maskedEmail;
+  final String lockReasonText;
+  final String? lockDetail;
+  final DateTime? lockedAt;
+  final bool canSubmit;
+  final String? blockedMessage;
+  final int remainingAppeals;
+  final DateTime? nextAppealAt;
+  final List<AppealHistoryItem> history;
+
+  factory AppealContext.fromJson(Json json) => AppealContext(
+    fullName: _s(json['fullName']),
+    maskedEmail: _s(json['maskedEmail']),
+    lockReasonText: _s(json['lockReasonText']),
+    lockDetail: _sn(json['lockDetail']),
+    lockedAt: _dtn(json['lockedAt']),
+    canSubmit: _b(json['canSubmit']),
+    blockedMessage: _sn(json['blockedMessage']),
+    remainingAppeals: _i(json['remainingAppeals']),
+    nextAppealAt: _dtn(json['nextAppealAt']),
+    history: _list(json['history'], AppealHistoryItem.fromJson),
+  );
+}
+
+class AppealSession {
+  const AppealSession({required this.token, required this.context});
+
+  final String token;
+  final AppealContext context;
+
+  factory AppealSession.fromJson(Json json) => AppealSession(
+    token: _s(json['token']),
+    context: AppealContext.fromJson(json['context'] as Json),
   );
 }
