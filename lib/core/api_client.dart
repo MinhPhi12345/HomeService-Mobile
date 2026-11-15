@@ -356,6 +356,10 @@ class ApiClient extends ChangeNotifier {
     return VoucherCheck.fromJson(result as Json);
   }
 
+  /// FR-31 – Tasker xem hạng tạm tính tháng này, điều kiện, điểm từng tiêu chí, top N, quy tắc và phần thưởng.
+  Future<MyRanking> getMyRanking() async =>
+      MyRanking.fromJson(await _send('GET', '/tasker-ranking/me') as Json);
+
   /// FR-32, FR-33 – "Ưu đãi của tôi".
   Future<List<MyVoucher>> getMyVouchers() async {
     final result = await _send('GET', '/vouchers/my');
@@ -640,6 +644,16 @@ class ApiClient extends ChangeNotifier {
   /// US26 – hồ sơ của Tasker / khách trong đơn kèm các đánh giá đã nhận.
   Future<PublicProfile> getPublicProfile(int userId) async =>
       PublicProfile.fromJson(await _send('GET', '/public-profiles/$userId') as Json);
+
+  /// Đánh giá người đó đã nhận (mới nhất trước), lọc theo [stars] 1–5 (null = tất cả), phân trang.
+  Future<Paged<Review>> getProfileReviews(int userId, {int? stars, int page = 1, int pageSize = 10}) async {
+    final result = await _send(
+      'GET',
+      '/public-profiles/$userId/reviews',
+      query: {'page': '$page', 'pageSize': '$pageSize', if (stars != null) 'stars': '$stars'},
+    );
+    return Paged.fromJson(result as Json, Review.fromJson);
+  }
 
   /// US27 – báo cáo đánh giá sai sự thật; bắt buộc nêu lý do (10–500 ký tự).
   Future<void> reportReview(int reviewId, String reason) =>

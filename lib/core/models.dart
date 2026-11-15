@@ -737,6 +737,8 @@ class PublicProfile {
     this.workingArea,
     this.skills,
     this.badges = const [],
+    this.currentTop,
+    this.ratingBreakdown = const [],
   });
 
   final int userId;
@@ -752,8 +754,14 @@ class PublicProfile {
   final String? skills;
   final List<Review> reviews;
 
-  /// FR-31 – huy hiệu Tasker xuất sắc tháng.
+  /// FR-31 – huy hiệu Tasker xuất sắc tháng (hạng chính thức các tháng đã duyệt).
   final List<AwardBadge> badges;
+
+  /// Đang trong top N tạm tính của tháng này (null nếu không).
+  final CurrentTop? currentTop;
+
+  /// Số đánh giá theo từng mức sao, từ 5★ xuống 1★. [reviews] chỉ có vài đánh giá mới nhất.
+  final List<StarCount> ratingBreakdown;
 
   bool get isTasker => role == 1;
 
@@ -771,6 +779,257 @@ class PublicProfile {
     skills: _sn(json['skills']),
     reviews: _list(json['reviews'], Review.fromJson),
     badges: _list(json['badges'], AwardBadge.fromJson),
+    currentTop: json['currentTop'] == null ? null : CurrentTop.fromJson(json['currentTop'] as Json),
+    ratingBreakdown: _list(json['ratingBreakdown'], StarCount.fromJson),
+  );
+}
+
+class StarCount {
+  const StarCount({required this.stars, required this.count});
+
+  final int stars;
+  final int count;
+
+  factory StarCount.fromJson(Json json) => StarCount(stars: _i(json['stars']), count: _i(json['count']));
+}
+
+/// Nhãn "Đang trong top N Tasker tháng này" (không có số hạng tạm tính vì còn thay đổi).
+class CurrentTop {
+  const CurrentTop({required this.year, required this.month, required this.topCount, required this.label});
+
+  final int year;
+  final int month;
+  final int topCount;
+  final String label;
+
+  factory CurrentTop.fromJson(Json json) => CurrentTop(
+    year: _i(json['year']),
+    month: _i(json['month']),
+    topCount: _i(json['topCount']),
+    label: _s(json['label']),
+  );
+}
+
+// ---------------------------------------------------------------- Xếp hạng Tasker xuất sắc tháng (Tasker xem)
+
+class AwardTier {
+  const AwardTier({required this.fromRank, required this.toRank, required this.bonus, this.commissionRate, required this.gift});
+
+  final int fromRank;
+  final int toRank;
+  final double bonus;
+  final double? commissionRate;
+  final bool gift;
+
+  String get rankLabel => fromRank == toRank ? 'Hạng $fromRank' : 'Hạng $fromRank–$toRank';
+
+  factory AwardTier.fromJson(Json json) => AwardTier(
+    fromRank: _i(json['fromRank']),
+    toRank: _i(json['toRank']),
+    bonus: _d(json['bonus']),
+    commissionRate: _dn(json['commissionRate']),
+    gift: _b(json['gift']),
+  );
+}
+
+class AwardRules {
+  const AwardRules({
+    required this.topCount,
+    required this.minCompletedBookings,
+    required this.minReviews,
+    required this.onTimeGraceMinutes,
+    required this.ratingWeight,
+    required this.completedWeight,
+    required this.acceptanceWeight,
+    required this.onTimeWeight,
+    required this.noDisputeWeight,
+    required this.defaultCommissionRate,
+    required this.tiers,
+  });
+
+  final int topCount;
+  final int minCompletedBookings;
+  final int minReviews;
+  final int onTimeGraceMinutes;
+  final double ratingWeight;
+  final double completedWeight;
+  final double acceptanceWeight;
+  final double onTimeWeight;
+  final double noDisputeWeight;
+  final double defaultCommissionRate;
+  final List<AwardTier> tiers;
+
+  factory AwardRules.fromJson(Json json) => AwardRules(
+    topCount: _i(json['topCount']),
+    minCompletedBookings: _i(json['minCompletedBookings']),
+    minReviews: _i(json['minReviews']),
+    onTimeGraceMinutes: _i(json['onTimeGraceMinutes']),
+    ratingWeight: _d(json['ratingWeight']),
+    completedWeight: _d(json['completedWeight']),
+    acceptanceWeight: _d(json['acceptanceWeight']),
+    onTimeWeight: _d(json['onTimeWeight']),
+    noDisputeWeight: _d(json['noDisputeWeight']),
+    defaultCommissionRate: _d(json['defaultCommissionRate']),
+    tiers: _list(json['tiers'], AwardTier.fromJson),
+  );
+}
+
+/// Một tiêu chí chấm điểm: [value] 0–1 trước khi nhân tỷ trọng, [points] điểm đóng góp (thang 100).
+class AwardScorePart {
+  const AwardScorePart({required this.key, required this.label, required this.weight, required this.value, required this.points, required this.detail});
+
+  final String key;
+  final String label;
+  final double weight;
+  final double value;
+  final double points;
+  final String detail;
+
+  factory AwardScorePart.fromJson(Json json) => AwardScorePart(
+    key: _s(json['key']),
+    label: _s(json['label']),
+    weight: _d(json['weight']),
+    value: _d(json['value']),
+    points: _d(json['points']),
+    detail: _s(json['detail']),
+  );
+}
+
+class LeaderboardEntry {
+  const LeaderboardEntry({
+    required this.rank,
+    required this.displayName,
+    this.avatarUrl,
+    required this.score,
+    required this.completedBookings,
+    required this.ratingAverage,
+    required this.isMe,
+  });
+
+  final int rank;
+  final String displayName;
+  final String? avatarUrl;
+  final double score;
+  final int completedBookings;
+  final double ratingAverage;
+  final bool isMe;
+
+  factory LeaderboardEntry.fromJson(Json json) => LeaderboardEntry(
+    rank: _i(json['rank']),
+    displayName: _s(json['displayName']),
+    avatarUrl: _sn(json['avatarUrl']),
+    score: _d(json['score']),
+    completedBookings: _i(json['completedBookings']),
+    ratingAverage: _d(json['ratingAverage']),
+    isMe: _b(json['isMe']),
+  );
+}
+
+class MyAwardHistory {
+  const MyAwardHistory({
+    required this.year,
+    required this.month,
+    required this.rank,
+    required this.bonusAmount,
+    this.preferentialRate,
+    required this.hasGift,
+    this.giftDescription,
+  });
+
+  final int year;
+  final int month;
+  final int rank;
+  final double bonusAmount;
+  final double? preferentialRate;
+  final bool hasGift;
+  final String? giftDescription;
+
+  factory MyAwardHistory.fromJson(Json json) => MyAwardHistory(
+    year: _i(json['year']),
+    month: _i(json['month']),
+    rank: _i(json['rank']),
+    bonusAmount: _d(json['bonusAmount']),
+    preferentialRate: _dn(json['preferentialRate']),
+    hasGift: _b(json['hasGift']),
+    giftDescription: _sn(json['giftDescription']),
+  );
+}
+
+/// GET /api/tasker-ranking/me – hạng tạm tính tháng này của Tasker. Điểm theo thang 100.
+class MyRanking {
+  const MyRanking({
+    required this.year,
+    required this.month,
+    required this.monthEnd,
+    required this.updatedAt,
+    required this.eligible,
+    required this.missingConditions,
+    this.rank,
+    required this.eligibleCount,
+    required this.inTop,
+    required this.score,
+    this.pointsBehindPrevious,
+    this.pointsToTop,
+    this.currentReward,
+    required this.completedBookings,
+    required this.reviewCount,
+    required this.ratingAverage,
+    required this.scoreParts,
+    required this.leaderboard,
+    required this.history,
+    required this.rules,
+  });
+
+  final int year;
+  final int month;
+  final DateTime monthEnd;
+  final DateTime updatedAt;
+  final bool eligible;
+  final List<String> missingConditions;
+  final int? rank;
+  final int eligibleCount;
+  final bool inTop;
+  final double score;
+  final double? pointsBehindPrevious;
+  final double? pointsToTop;
+  final AwardTier? currentReward;
+  final int completedBookings;
+  final int reviewCount;
+  final double ratingAverage;
+  final List<AwardScorePart> scoreParts;
+  final List<LeaderboardEntry> leaderboard;
+  final List<MyAwardHistory> history;
+  final AwardRules rules;
+
+  String get monthLabel => '${month.toString().padLeft(2, '0')}/$year';
+
+  /// Số ngày còn lại của tháng (tính cả hôm nay).
+  int get daysLeft {
+    final d = monthEnd.difference(DateTime.now());
+    return d.isNegative ? 0 : (d.inHours / 24).ceil();
+  }
+
+  factory MyRanking.fromJson(Json json) => MyRanking(
+    year: _i(json['year']),
+    month: _i(json['month']),
+    monthEnd: _dt(json['monthEnd']),
+    updatedAt: _dt(json['updatedAt']),
+    eligible: _b(json['eligible']),
+    missingConditions: _strings(json['missingConditions']),
+    rank: _in(json['rank']),
+    eligibleCount: _i(json['eligibleCount']),
+    inTop: _b(json['inTop']),
+    score: _d(json['score']),
+    pointsBehindPrevious: _dn(json['pointsBehindPrevious']),
+    pointsToTop: _dn(json['pointsToTop']),
+    currentReward: json['currentReward'] == null ? null : AwardTier.fromJson(json['currentReward'] as Json),
+    completedBookings: _i(json['completedBookings']),
+    reviewCount: _i(json['reviewCount']),
+    ratingAverage: _d(json['ratingAverage']),
+    scoreParts: _list(json['scoreParts'], AwardScorePart.fromJson),
+    leaderboard: _list(json['leaderboard'], LeaderboardEntry.fromJson),
+    history: _list(json['history'], MyAwardHistory.fromJson),
+    rules: AwardRules.fromJson(json['rules'] as Json),
   );
 }
 
