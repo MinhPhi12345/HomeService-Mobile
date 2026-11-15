@@ -1324,7 +1324,10 @@ class _TaskerCard extends StatelessWidget {
                     ),
                     if (booking.taskerBadges.isNotEmpty) ...[
                       const SizedBox(height: 4),
-                      AwardBadgeChip(label: booking.taskerBadges.first),
+                      AwardBadgeChip(
+                        label: booking.taskerBadges.first,
+                        rank: int.tryParse(RegExp(r'^Hạng (\d+)').firstMatch(booking.taskerBadges.first)?.group(1) ?? '') ?? 1,
+                      ),
                     ],
                     const SizedBox(height: 4),
                     if (rating != null)

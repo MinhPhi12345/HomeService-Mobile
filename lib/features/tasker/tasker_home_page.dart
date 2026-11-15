@@ -15,6 +15,7 @@ import '../../widgets/motion.dart';
 import '../common/public_profile_page.dart';
 import 'job_detail_page.dart';
 import 'tasker_profile_page.dart';
+import 'tasker_ranking_page.dart';
 import 'wallet_page.dart';
 
 /// US16, US17, US28 – Tasker bật nhận đơn, xem lời mời theo đợt và nhận / từ chối.
@@ -31,6 +32,7 @@ class TaskerHomePageState extends State<TaskerHomePage> {
   TaskerProfile? _profile;
   bool _profileMissing = false;
   Wallet? _wallet;
+  MyRanking? _ranking;
   List<TaskerOffer> _offers = const [];
   Booking? _nextJob;
   bool _loading = true;
@@ -81,6 +83,7 @@ class TaskerHomePageState extends State<TaskerHomePage> {
           _wallet = results[0] as Wallet;
           _nextJob = upcoming.isEmpty ? null : upcoming.first;
         });
+        unawaited(_loadRanking());
         await _loadOffers();
       }
     } catch (error) {
@@ -202,6 +205,14 @@ class TaskerHomePageState extends State<TaskerHomePage> {
     } finally {
       if (mounted) setState(() => _acting.remove(offer.offerId));
     }
+  }
+
+  /// FR-31 – hạng tạm tính tháng này cho thẻ "Tasker xuất sắc tháng" (lỗi thì chỉ ẩn thẻ).
+  Future<void> _loadRanking() async {
+    try {
+      final ranking = await AppScope.api(context).getMyRanking();
+      if (mounted) setState(() => _ranking = ranking);
+    } catch (_) {}
   }
 
   Future<void> _open(Widget page) async {
@@ -389,6 +400,11 @@ class TaskerHomePageState extends State<TaskerHomePage> {
         area: profile.workingArea,
         depositOk: wallet?.meetsDeposit ?? true,
         onChanged: _toggle,
+      ),
+      const SizedBox(height: 12),
+      _RankingCard(
+        ranking: _ranking,
+        onTap: () => _open(TaskerRankingPage(initial: _ranking)),
       ),
       const SizedBox(height: 12),
       Row(
@@ -901,6 +917,62 @@ class _WaitingRadar extends StatelessWidget {
             style: AppText.muted,
             textAlign: TextAlign.center,
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// FR-31 – thẻ hạng tạm tính tháng này, bấm để xem chi tiết, quy tắc và phần thưởng.
+class _RankingCard extends StatelessWidget {
+  const _RankingCard({required this.ranking, required this.onTap});
+
+  final MyRanking? ranking;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final r = ranking;
+    final top = r != null && r.inTop;
+    final fg = top ? const Color(0xFF8A6000) : AppColors.primaryDark;
+    return AppCard(
+      onTap: onTap,
+      padding: const EdgeInsets.all(14),
+      color: top ? const Color(0xFFFFFBEA) : AppColors.surface,
+      borderColor: top ? const Color(0xFFFFE08A) : AppColors.line,
+      radius: AppRadius.md,
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: top ? const Color(0xFFFFE08A) : AppColors.primarySoft,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: r != null && r.eligible
+                ? Text('#${r.rank}', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: fg))
+                : Icon(Icons.leaderboard_rounded, color: fg),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  r == null ? 'Tasker xuất sắc tháng' : 'Xếp hạng tháng ${r.monthLabel}',
+                  style: AppText.body.copyWith(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  r == null ? 'Xem hạng của bạn, quy tắc tham gia và phần thưởng.' : rankingSummary(r),
+                  style: AppText.small.copyWith(color: AppColors.inkSoft),
+                ),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
         ],
       ),
     );

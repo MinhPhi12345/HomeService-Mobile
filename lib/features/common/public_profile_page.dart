@@ -54,6 +54,12 @@ class _PublicProfilePageState extends State<PublicProfilePage> {
     }
   }
 
+  void _openReviews(PublicProfile p, {int? stars}) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => ProfileReviewsPage(profile: p, initialStars: stars)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = _profile;
@@ -79,7 +85,7 @@ class _PublicProfilePageState extends State<PublicProfilePage> {
                           value: p.ratingAverage == null
                               ? '—'
                               : p.ratingAverage!.toStringAsFixed(1),
-                          label: p.ratingAverage == null ? 'Chưa có điểm' : 'Điểm trung bình',
+                          label: p.ratingAverage == null ? 'Chưa có điểm' : 'Trung bình',
                           icon: Icons.star_rounded,
                           color: const Color(0xFFF5B301),
                         ),
@@ -127,18 +133,37 @@ class _PublicProfilePageState extends State<PublicProfilePage> {
                     ),
                   ],
                   const SizedBox(height: 18),
-                  SectionHeader('Đánh giá (${p.reviewCount})'),
+                  SectionHeader(
+                    'Đánh giá (${p.reviewCount})',
+                    trailing: p.reviewCount > p.reviews.length
+                        ? TextButton(onPressed: () => _openReviews(p), child: const Text('Xem tất cả'))
+                        : null,
+                  ),
                   if (p.reviews.isEmpty)
                     const EmptyView(
                       icon: Icons.reviews_outlined,
                       title: 'Chưa có đánh giá nào',
                       message: 'Đánh giá sẽ hiện ở đây sau khi hoàn tất các đơn.',
                     )
-                  else
+                  else ...[
+                    if (p.ratingBreakdown.isNotEmpty) ...[
+                      _RatingSummary(
+                        profile: p,
+                        onTapStars: (stars) => _openReviews(p, stars: stars),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
                     for (final review in p.reviews) ...[
                       _ReviewItem(review: review),
                       const SizedBox(height: 8),
                     ],
+                    if (p.reviewCount > p.reviews.length)
+                      SecondaryButton(
+                        label: 'Xem tất cả ${p.reviewCount} đánh giá',
+                        icon: Icons.reviews_outlined,
+                        onPressed: () => _openReviews(p),
+                      ),
+                  ],
                 ],
               ),
             ),
@@ -179,14 +204,23 @@ class _Header extends StatelessWidget {
                     dense: true,
                   ),
                 ],
-                if (p.isTasker && p.badges.isNotEmpty) ...[
+                if (p.isTasker && (p.badges.isNotEmpty || p.currentTop != null)) ...[
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 6,
                     runSpacing: 6,
                     children: [
+                      // Đang trong top N tạm tính của tháng này
+                      if (p.currentTop != null)
+                        StatusChip(
+                          label: p.currentTop!.label,
+                          color: AppColors.primaryDark,
+                          icon: Icons.trending_up_rounded,
+                          dense: true,
+                        ),
+                      // Hạng chính thức các tháng đã được duyệt
                       for (final badge in p.badges.take(3))
-                        AwardBadgeChip(label: badge.label, rank: badge.rank),
+                        AwardBadgeChip(label: 'Hạng ${badge.rank} · ${badge.label}', rank: badge.rank),
                     ],
                   ),
                 ],
@@ -194,6 +228,255 @@ class _Header extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Điểm trung bình + số đánh giá theo từng mức sao; bấm một dòng để xem riêng các đánh giá mức đó.
+class _RatingSummary extends StatelessWidget {
+  const _RatingSummary({required this.profile, required this.onTapStars});
+
+  final PublicProfile profile;
+  final ValueChanged<int> onTapStars;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = profile;
+    final total = p.reviewCount == 0 ? 1 : p.reviewCount;
+    return AppCard(
+      padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+      child: Row(
+        children: [
+          Column(
+            children: [
+              Text(
+                p.ratingAverage == null ? '—' : p.ratingAverage!.toStringAsFixed(1),
+                style: AppText.display,
+              ),
+              RatingStars(rating: p.ratingAverage ?? 0, size: 13),
+              const SizedBox(height: 2),
+              Text('${p.reviewCount} đánh giá', style: AppText.small),
+            ],
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              children: [
+                for (final s in p.ratingBreakdown)
+                  InkWell(
+                    borderRadius: BorderRadius.circular(6),
+                    onTap: s.count == 0 ? null : () => onTapStars(s.stars),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 4),
+                      child: Row(
+                        children: [
+                          SizedBox(width: 12, child: Text('${s.stars}', style: AppText.small)),
+                          const Icon(Icons.star_rounded, size: 13, color: Color(0xFFF5B301)),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(99),
+                              child: LinearProgressIndicator(
+                                value: s.count / total,
+                                minHeight: 7,
+                                color: const Color(0xFFF5B301),
+                                backgroundColor: AppColors.line,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          SizedBox(
+                            width: 22,
+                            child: Text('${s.count}', style: AppText.small, textAlign: TextAlign.right),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Tất cả đánh giá của một người, lọc theo số sao, tải thêm khi cuộn (10 đánh giá / lần).
+class ProfileReviewsPage extends StatefulWidget {
+  const ProfileReviewsPage({super.key, required this.profile, this.initialStars});
+
+  final PublicProfile profile;
+  final int? initialStars;
+
+  @override
+  State<ProfileReviewsPage> createState() => _ProfileReviewsPageState();
+}
+
+class _ProfileReviewsPageState extends State<ProfileReviewsPage> {
+  final _items = <Review>[];
+  int? _stars;
+  int _page = 1;
+  int _total = 0;
+  bool _hasMore = false;
+  bool _loading = true;
+  bool _loadingMore = false;
+  String? _error;
+  int _request = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _stars = widget.initialStars;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  Future<void> _load({bool more = false}) async {
+    if (more && (_loadingMore || !_hasMore)) return;
+    final request = ++_request; // bỏ kết quả của lần lọc cũ nếu người dùng đổi bộ lọc nhanh
+    setState(() {
+      if (more) {
+        _loadingMore = true;
+      } else {
+        _loading = true;
+        _error = null;
+      }
+    });
+    try {
+      final page = more ? _page + 1 : 1;
+      final result = await AppScope.api(context).getProfileReviews(widget.profile.userId, stars: _stars, page: page);
+      if (!mounted || request != _request) return;
+      setState(() {
+        if (!more) _items.clear();
+        _items.addAll(result.items);
+        _page = page;
+        _total = result.totalCount;
+        _hasMore = result.hasMore;
+      });
+    } catch (error) {
+      if (mounted && request == _request) setState(() => _error = errorMessage(error));
+    } finally {
+      if (mounted && request == _request) {
+        setState(() {
+          _loading = false;
+          _loadingMore = false;
+        });
+      }
+    }
+  }
+
+  void _select(int? stars) {
+    if (stars == _stars) return;
+    setState(() => _stars = stars);
+    _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.profile;
+    int countOf(int s) => p.ratingBreakdown.where((x) => x.stars == s).fold(0, (sum, x) => sum + x.count);
+    return Scaffold(
+      appBar: hsAppBar('Đánh giá về ${p.displayName}'),
+      body: Column(
+        children: [
+          SizedBox(
+            height: 48,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+              children: [
+                _StarChip(label: 'Tất cả (${p.reviewCount})', selected: _stars == null, onTap: () => _select(null)),
+                for (var s = 5; s >= 1; s--)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: _StarChip(
+                      label: '$s★ (${countOf(s)})',
+                      selected: _stars == s,
+                      onTap: countOf(s) == 0 ? null : () => _select(s),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: _loading && _items.isEmpty
+                ? const LoadingView()
+                : _error != null && _items.isEmpty
+                ? ErrorView(message: _error!, onRetry: _load)
+                : _items.isEmpty
+                ? const EmptyView(
+                    icon: Icons.reviews_outlined,
+                    title: 'Không có đánh giá phù hợp',
+                    message: 'Thử chọn mức sao khác.',
+                  )
+                : NotificationListener<ScrollNotification>(
+                    onNotification: (n) {
+                      if (n.metrics.pixels > n.metrics.maxScrollExtent - 200) _load(more: true);
+                      return false;
+                    },
+                    child: RefreshIndicator(
+                      color: AppColors.primary,
+                      onRefresh: _load,
+                      child: ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                        itemCount: _items.length + 1,
+                        separatorBuilder: (context, index) => const SizedBox(height: 8),
+                        itemBuilder: (context, index) {
+                          if (index < _items.length) return _ReviewItem(review: _items[index]);
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Center(
+                              child: _loadingMore
+                                  ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4))
+                                  : Text(
+                                      _hasMore ? 'Kéo xuống để xem thêm' : 'Đã hiện ${_items.length}/$_total đánh giá',
+                                      style: AppText.small,
+                                    ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StarChip extends StatelessWidget {
+  const _StarChip({required this.label, required this.selected, required this.onTap});
+
+  final String label;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final disabled = onTap == null && !selected;
+    return Material(
+      color: selected ? AppColors.ink : AppColors.surface,
+      borderRadius: BorderRadius.circular(99),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(99),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: selected ? AppColors.ink : AppColors.line),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: selected ? Colors.white : (disabled ? AppColors.muted : AppColors.inkSoft),
+            ),
+          ),
+        ),
       ),
     );
   }
